@@ -1,0 +1,22 @@
+{
+  "name": "alerts-timeline",
+  "version": "1.0.0",
+  "description": "可愛いパステルカラーのタイムライン通知アプリ",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging",
+    "build": "electron-builder",
+    "dist": "electron-builder --publish=never"
+  },
+  "keywords": ["electron", "notification", "timeline", "alerts"],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.2"
+  }
+}

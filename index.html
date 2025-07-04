@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通知タイムライン</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- ヘッダー部分 -->
+        <div class="header">
+            <div class="window-controls">
+                <button class="control-btn minimize-btn" onclick="minimizeWindow()">－</button>
+                <button class="control-btn close-btn" onclick="closeWindow()">×</button>
+            </div>
+            <h1 class="app-title">🌸 通知タイムライン</h1>
+        </div>
+
+        <!-- タイムライン表示部分（メイン） -->
+        <div class="timeline-container">
+            <div id="timeline" class="timeline">
+                <!-- 動的に追加される通知アイテム -->
+            </div>
+        </div>
+
+        <!-- 新しい通知を追加するフォーム（下部固定） -->
+        <div class="add-alert-form">
+            <div class="form-toggle">
+                <button class="toggle-btn" onclick="toggleForm()">
+                    <span class="toggle-icon">+</span>
+                    <span class="toggle-text">新しい通知</span>
+                </button>
+            </div>
+            
+            <div class="form-content" id="form-content">
+                <div class="form-compact">
+                    <div class="form-row">
+                        <input type="text" id="alert-content" placeholder="通知内容を入力..." class="input-compact">
+                        <input type="date" id="alert-date" class="input-compact">
+                        <input type="time" id="alert-time" class="input-compact">
+                    </div>
+                    <div class="form-row">
+                        <input type="url" id="alert-url" placeholder="URL（任意）" class="input-compact">
+                        <select id="reminder-minutes" class="input-compact">
+                            <option value="0">通知なし</option>
+                            <option value="1">1分前</option>
+                            <option value="3">3分前</option>
+                            <option value="5">5分前</option>
+                            <option value="10">10分前</option>
+                            <option value="15">15分前</option>
+                            <option value="30">30分前</option>
+                            <option value="60">1時間前</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <select id="repeat-type" class="input-compact">
+                            <option value="none">繰り返しなし</option>
+                            <option value="daily">毎日</option>
+                            <option value="weekly">毎週</option>
+                            <option value="monthly">毎月</option>
+                        </select>
+                        <button class="add-btn-compact" onclick="addAlert()">追加</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
