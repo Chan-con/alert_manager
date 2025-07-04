@@ -7,7 +7,8 @@
     "start": "electron .",
     "dev": "electron . --enable-logging",
     "build": "electron-builder",
-    "dist": "electron-builder --publish=never"
+    "dist": "electron-builder --publish=never",
+    "package:win": "electron-builder --win"
   },
   "keywords": ["electron", "notification", "timeline", "alerts"],
   "author": "Your Name",
@@ -18,5 +19,24 @@
   },
   "dependencies": {
     "node-cron": "^3.0.2"
+  },
+  "build": {
+    "appId": "com.example.alerts-timeline",
+    "productName": "Alerts Timeline",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }
