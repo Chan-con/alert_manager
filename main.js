@@ -6,6 +6,7 @@ const cron = require('node-cron');
 let mainWindow;
 let alerts = [];
 let tray = null;
+let autoStartEnabled = false;
 
 // 二重起動を防止
 const gotTheLock = app.requestSingleInstanceLock();
@@ -85,6 +86,21 @@ function createTray() {
     tray = new Tray('');
   }
   
+  updateTrayMenu();
+  
+  tray.setToolTip('通知タイムライン');
+  
+  // トレイアイコンをクリックしたときの処理
+  tray.on('click', () => {
+    if (mainWindow.isVisible()) {
+      mainWindow.hide();
+    } else {
+      mainWindow.show();
+    }
+  });
+}
+
+function updateTrayMenu() {
   const contextMenu = Menu.buildFromTemplate([
     {
       label: '表示',
@@ -102,6 +118,17 @@ function createTray() {
       type: 'separator'
     },
     {
+      label: 'PC起動時に自動開始',
+      type: 'checkbox',
+      checked: autoStartEnabled,
+      click: () => {
+        toggleAutoStart();
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
       label: '終了',
       click: () => {
         app.isQuiting = true;
@@ -110,21 +137,63 @@ function createTray() {
     }
   ]);
 
-  tray.setToolTip('通知タイムライン');
   tray.setContextMenu(contextMenu);
+}
+
+// 自動起動の設定を管理する関数
+function toggleAutoStart() {
+  autoStartEnabled = !autoStartEnabled;
   
-  // トレイアイコンをクリックしたときの処理
-  tray.on('click', () => {
-    if (mainWindow.isVisible()) {
-      mainWindow.hide();
-    } else {
-      mainWindow.show();
-    }
+  app.setLoginItemSettings({
+    openAtLogin: autoStartEnabled,
+    openAsHidden: true,
+    path: process.execPath,
+    args: ['--hidden']
   });
+  
+  saveSettings();
+  updateTrayMenu();
+}
+
+// 現在の自動起動状態を取得
+function getAutoStartStatus() {
+  const loginItemSettings = app.getLoginItemSettings();
+  autoStartEnabled = loginItemSettings.openAtLogin;
+  return autoStartEnabled;
+}
+
+// 設定を保存
+function saveSettings() {
+  const settingsPath = path.join(__dirname, 'settings.json');
+  const settings = {
+    autoStartEnabled: autoStartEnabled
+  };
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+}
+
+// 設定を読み込み
+function loadSettings() {
+  const settingsPath = path.join(__dirname, 'settings.json');
+  if (fs.existsSync(settingsPath)) {
+    try {
+      const data = fs.readFileSync(settingsPath, 'utf8');
+      const settings = JSON.parse(data);
+      autoStartEnabled = settings.autoStartEnabled || false;
+    } catch (error) {
+      console.error('設定読み込みエラー:', error);
+      autoStartEnabled = false;
+    }
+  }
+  
+  // 現在のシステム設定と同期
+  getAutoStartStatus();
 }
 
 // アプリが準備完了したときの処理
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  loadSettings();
+  createWindow();
+});
 
 // 全てのウィンドウが閉じられたときの処理
 app.on('window-all-closed', () => {
@@ -193,6 +262,22 @@ function loadAlerts() {
   if (fs.existsSync(alertsPath)) {
     const data = fs.readFileSync(alertsPath, 'utf8');
     alerts = JSON.parse(data);
+    
+    // 期限切れのアラートを自動削除（繰り返しなしのもののみ）
+    const now = new Date();
+    const originalLength = alerts.length;
+    alerts = alerts.filter(alert => {
+      const alertTime = new Date(alert.dateTime);
+      // 繰り返しアラートまたは未来のアラートのみ保持
+      return (alert.repeatType && alert.repeatType !== 'none') || alertTime > now;
+    });
+    
+    // 削除されたアラートがあれば保存
+    if (alerts.length !== originalLength) {
+      saveAlerts();
+      console.log(`期限切れのアラートを${originalLength - alerts.length}個削除しました`);
+    }
+    
     // 既存のアラートのスケジュールを再設定
     alerts.forEach(alert => {
       if (new Date(alert.dateTime) > new Date()) {

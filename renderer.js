@@ -81,14 +81,14 @@ async function addAlert() {
     const repeatType = document.getElementById('repeat-type').value;
     
     if (!content || !date || !time) {
-        alert('通知内容、日付、時間を入力してください。');
+        showCuteAlert('通知内容、日付、時間を入力してください。', 'error');
         return false;
     }
     
     const dateTime = new Date(`${date}T${time}`);
     
     if (dateTime <= new Date()) {
-        alert('未来の日時を選択してください。');
+        showCuteAlert('未来の日時を選択してください。', 'error');
         return false;
     }
     
@@ -118,14 +118,15 @@ async function addAlert() {
         return true;
     } catch (error) {
         console.error('アラート追加エラー:', error);
-        alert('アラートの追加に失敗しました。');
+        showCuteAlert('アラートの追加に失敗しました。', 'error');
         return false;
     }
 }
 
 // アラートを削除
 async function deleteAlert(id) {
-    if (!confirm('この通知を削除しますか？')) {
+    const confirmed = await showCuteConfirmDialog('この通知を削除しますか？', '削除すると元に戻すことはできません。');
+    if (!confirmed) {
         return;
     }
     
@@ -137,7 +138,7 @@ async function deleteAlert(id) {
         console.log('アラートを削除しました:', id);
     } catch (error) {
         console.error('アラート削除エラー:', error);
-        alert('アラートの削除に失敗しました。');
+        showCuteAlert('アラートの削除に失敗しました。', 'error');
     }
 }
 
@@ -226,14 +227,14 @@ async function saveEdit(id) {
     const repeatType = document.getElementById('edit-repeat').value;
     
     if (!content || !date || !time) {
-        alert('通知内容、日付、時間を入力してください。');
+        showCuteAlert('通知内容、日付、時間を入力してください。', 'error');
         return;
     }
     
     const dateTime = new Date(`${date}T${time}`);
     
     if (dateTime <= new Date()) {
-        alert('未来の日時を選択してください。');
+        showCuteAlert('未来の日時を選択してください。', 'error');
         return;
     }
     
@@ -258,7 +259,7 @@ async function saveEdit(id) {
         }
     } catch (error) {
         console.error('アラート更新エラー:', error);
-        alert('アラートの更新に失敗しました。');
+        showCuteAlert('アラートの更新に失敗しました。', 'error');
     }
 }
 
@@ -279,10 +280,22 @@ function updateTimeline() {
         return;
     }
     
-    // 日時順にソート（早い順）
-    const sortedAlerts = [...alerts].sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
-    
     const now = new Date();
+    
+    // 有効なアラートのみを表示（期限切れは繰り返しアラートのみ残す）
+    const activeAlerts = alerts.filter(alert => {
+        const alertTime = new Date(alert.dateTime);
+        // 未来のアラートまたは繰り返しアラートのみ表示
+        return alertTime > now || (alert.repeatType && alert.repeatType !== 'none');
+    });
+    
+    if (activeAlerts.length === 0) {
+        timeline.innerHTML = '<div class="empty-timeline">有効な通知がありません<br>新しい通知を追加してみましょう！</div>';
+        return;
+    }
+    
+    // 日時順にソート（早い順）
+    const sortedAlerts = [...activeAlerts].sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
     
     timeline.innerHTML = sortedAlerts.map(alert => {
         const alertTime = new Date(alert.dateTime);
@@ -467,6 +480,93 @@ function updateUrlInputStyle() {
         urlInput.style.borderColor = '#e8f4ff';
         urlInput.style.boxShadow = 'none';
     }
+}
+
+// かわいい確認ダイアログを表示
+function showCuteConfirmDialog(title, message) {
+    return new Promise((resolve) => {
+        const dialog = document.createElement('div');
+        dialog.className = 'cute-dialog-overlay';
+        
+        dialog.innerHTML = `
+            <div class="cute-dialog">
+                <div class="cute-dialog-header">
+                    <span class="cute-dialog-emoji">🌸</span>
+                    <h3 class="cute-dialog-title">${title}</h3>
+                </div>
+                <div class="cute-dialog-content">
+                    <p class="cute-dialog-message">${message}</p>
+                </div>
+                <div class="cute-dialog-buttons">
+                    <button class="cute-btn cute-btn-secondary" onclick="handleCuteDialogResponse(false)">
+                        <span>キャンセル</span>
+                    </button>
+                    <button class="cute-btn cute-btn-primary" onclick="handleCuteDialogResponse(true)">
+                        <span>削除する</span>
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        // アニメーション
+        setTimeout(() => {
+            dialog.classList.add('show');
+        }, 10);
+        
+        // グローバルハンドラーを設定
+        window.handleCuteDialogResponse = (result) => {
+            dialog.classList.remove('show');
+            setTimeout(() => {
+                document.body.removeChild(dialog);
+                delete window.handleCuteDialogResponse;
+                resolve(result);
+            }, 300);
+        };
+    });
+}
+
+// かわいいアラートダイアログを表示
+function showCuteAlert(message, type = 'info') {
+    const dialog = document.createElement('div');
+    dialog.className = 'cute-dialog-overlay';
+    
+    const emoji = type === 'error' ? '😿' : '🌟';
+    const titleText = type === 'error' ? 'エラー' : 'お知らせ';
+    
+    dialog.innerHTML = `
+        <div class="cute-dialog">
+            <div class="cute-dialog-header">
+                <span class="cute-dialog-emoji">${emoji}</span>
+                <h3 class="cute-dialog-title">${titleText}</h3>
+            </div>
+            <div class="cute-dialog-content">
+                <p class="cute-dialog-message">${message}</p>
+            </div>
+            <div class="cute-dialog-buttons">
+                <button class="cute-btn cute-btn-primary" onclick="closeCuteAlert()">
+                    <span>OK</span>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(dialog);
+    
+    // アニメーション
+    setTimeout(() => {
+        dialog.classList.add('show');
+    }, 10);
+    
+    // グローバルハンドラーを設定
+    window.closeCuteAlert = () => {
+        dialog.classList.remove('show');
+        setTimeout(() => {
+            document.body.removeChild(dialog);
+            delete window.closeCuteAlert;
+        }, 300);
+    };
 }
 
 // 既存のaddAlert関数を保存
