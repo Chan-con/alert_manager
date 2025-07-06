@@ -374,11 +374,13 @@ function processLinks(text) {
 }
 
 // リンクを新しいウィンドウで開く
-async function openLink(url) {
+window.openLink = async function(url) {
     try {
-        await ipcRenderer.invoke('open-link', url);
+        console.log('🔗 openLink関数が呼び出されました:', url);
+        const result = await ipcRenderer.invoke('open-link', url);
+        console.log('🔗 open-link結果:', result);
     } catch (error) {
-        console.error('リンクオープンエラー:', error);
+        console.error('🔗 リンクオープンエラー:', error);
     }
 }
 
@@ -399,10 +401,16 @@ async function closeWindow() {
     }
 }
 
-// エンターキーでフォーム送信
+
+// キーボードショートカット
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         addAlert();
+    }
+    
+    // ESCキーでウインドウを閉じる
+    if (e.key === 'Escape') {
+        closeWindow();
     }
 });
 
@@ -419,6 +427,8 @@ function toggleForm() {
         formContent.classList.add('active');
         toggleBtn.classList.add('active');
         toggleBtn.querySelector('.toggle-text').textContent = '閉じる';
+        // フォームを開いた時に現在の日付と時刻を設定
+        setDefaultDateTime();
     } else {
         formContent.classList.remove('active');
         toggleBtn.classList.remove('active');

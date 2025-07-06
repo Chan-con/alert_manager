@@ -26,12 +26,13 @@ body {
 /* ヘッダー */
 .header {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
-    padding: 15px 20px;
+    padding: 10px 15px;
     background: linear-gradient(135deg, #ffd6e8 0%, #e8f4ff 100%);
     border-radius: 20px 20px 0 0;
     -webkit-app-region: drag;
+    min-height: 40px;
 }
 
 .window-controls {
@@ -60,16 +61,11 @@ body {
     color: white;
 }
 
+
 .control-btn:hover {
     transform: scale(1.1);
 }
 
-.app-title {
-    font-size: 18px;
-    color: #6b73ff;
-    font-weight: bold;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-}
 
 /* フォーム（下部固定） */
 .add-alert-form {

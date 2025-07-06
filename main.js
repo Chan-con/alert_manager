@@ -2,11 +2,16 @@ const { app, BrowserWindow, ipcMain, shell, Notification, Tray, Menu } = require
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
+const express = require('express');
+const { spawn } = require('child_process');
+const os = require('os');
 
 let mainWindow;
 let alerts = [];
 let tray = null;
 let autoStartEnabled = false;
+let expressApp;
+let serverPort = 3000;
 
 // 二重起動を防止
 const gotTheLock = app.requestSingleInstanceLock();
@@ -189,9 +194,150 @@ function loadSettings() {
   getAutoStartStatus();
 }
 
+// Expressサーバーを起動
+function startExpressServer() {
+  expressApp = express();
+  expressApp.use(express.json());
+  
+  // CORS設定
+  expressApp.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    next();
+  });
+  
+  // 新規ウィンドウでURLを開くAPI
+  expressApp.post('/api/open-url', async (req, res) => {
+    const { url } = req.body;
+    
+    try {
+      const platform = os.platform();
+      console.log(`Platform: ${platform}`);
+      
+      // 専用プロファイルディレクトリを作成
+      const userDataDir = path.join(os.homedir(), '.alerts-timeline-chrome-profile');
+      if (!fs.existsSync(userDataDir)) {
+        fs.mkdirSync(userDataDir, { recursive: true });
+        console.log(`Created profile directory: ${userDataDir}`);
+      }
+      
+      // メインウィンドウの位置を取得
+      let windowPosition = '100,100';
+      if (mainWindow) {
+        const bounds = mainWindow.getBounds();
+        windowPosition = `${bounds.x + 50},${bounds.y + 50}`;
+      }
+      
+      const chromeArgs = [
+        '--new-window',
+        '--no-default-browser-check',
+        '--no-first-run', 
+        '--disable-default-apps',
+        `--user-data-dir=${userDataDir}`,
+        `--window-position=${windowPosition}`,
+        '--window-size=1200,800',
+        url
+      ];
+      
+      if (platform === 'win32') {
+        // Windows用 - 複数のChromeパスを試行
+        const chromePaths = [
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+          path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe')
+        ];
+        
+        let chromeFound = false;
+        for (const chromePath of chromePaths) {
+          if (fs.existsSync(chromePath)) {
+            console.log(`Chromeを起動: ${chromePath}`);
+            spawn(chromePath, chromeArgs, { 
+              detached: true, 
+              stdio: 'ignore' 
+            });
+            chromeFound = true;
+            break;
+          }
+        }
+        
+        if (!chromeFound) {
+          console.log('デフォルトブラウザで開く');
+          spawn('cmd', ['/c', 'start', '', url], { 
+            detached: true, 
+            stdio: 'ignore' 
+          });
+        }
+        
+      } else if (platform === 'darwin') {
+        // macOS用
+        console.log('macOS用のブラウザ起動');
+        spawn('open', ['-n', '-a', 'Google Chrome', '--args', ...chromeArgs], { 
+          detached: true, 
+          stdio: 'ignore' 
+        });
+        
+      } else {
+        // Linux用 - 複数のブラウザを試行
+        console.log('Linux用のブラウザ起動');
+        
+        const browsers = [
+          { cmd: 'google-chrome', args: chromeArgs },
+          { cmd: 'chromium-browser', args: chromeArgs },
+          { cmd: 'firefox', args: ['-new-window', url] },
+          { cmd: 'xdg-open', args: [url] }
+        ];
+        
+        let browserFound = false;
+        for (const browser of browsers) {
+          try {
+            console.log(`Trying ${browser.cmd}...`);
+            spawn(browser.cmd, browser.args, { 
+              detached: true, 
+              stdio: 'ignore' 
+            });
+            console.log(`Successfully launched ${browser.cmd}`);
+            browserFound = true;
+            break;
+          } catch (error) {
+            console.log(`Failed to launch ${browser.cmd}: ${error.message}`);
+            continue;
+          }
+        }
+        
+        if (!browserFound) {
+          console.log('No browser found');
+        }
+      }
+      
+      console.log('新規ブラウザウィンドウを開きました');
+      res.json({ success: true });
+      
+    } catch (error) {
+      console.error('Error opening browser:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+  
+  // 利用可能なポートを見つけて起動
+  const server = expressApp.listen(serverPort, () => {
+    console.log(`Express server started on port ${serverPort}`);
+  }).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      serverPort++;
+      console.log(`Port ${serverPort - 1} is busy, trying ${serverPort}`);
+      server.listen(serverPort);
+    } else {
+      console.error('Express server error:', err);
+    }
+  });
+}
+
 // アプリが準備完了したときの処理
 app.whenReady().then(() => {
   loadSettings();
+  loadAlerts(); // アラートデータを先に読み込む
+  startExpressServer(); // Expressサーバーを起動
   createWindow();
 });
 
@@ -207,6 +353,12 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
+});
+
+// アプリ終了時にデータを保存
+app.on('before-quit', () => {
+  saveAlerts();
+  saveSettings();
 });
 
 // IPC通信の設定
@@ -239,8 +391,104 @@ ipcMain.handle('delete-alert', (event, id) => {
   return true;
 });
 
-ipcMain.handle('open-link', (event, url) => {
-  shell.openExternal(url);
+ipcMain.handle('open-link', async (event, url) => {
+  console.log('新規ブラウザウィンドウを開きます:', url);
+  
+  const platform = os.platform();
+  console.log(`Platform: ${platform}`);
+  
+  // 専用プロファイルディレクトリを作成
+  const userDataDir = path.join(os.homedir(), '.alerts-timeline-chrome-profile');
+  if (!fs.existsSync(userDataDir)) {
+    fs.mkdirSync(userDataDir, { recursive: true });
+    console.log(`Created profile directory: ${userDataDir}`);
+  }
+  
+  // 画面の中央にウィンドウを配置
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+  
+  const windowWidth = 1200;
+  const windowHeight = 800;
+  const centerX = Math.round((screenWidth - windowWidth) / 2);
+  const centerY = Math.round((screenHeight - windowHeight) / 2);
+  
+  const windowPosition = `${centerX},${centerY}`;
+  
+  const chromeArgs = [
+    '--new-window',
+    '--no-default-browser-check',
+    '--no-first-run', 
+    '--disable-default-apps',
+    `--user-data-dir=${userDataDir}`,
+    `--window-position=${windowPosition}`,
+    '--window-size=1200,800',
+    url
+  ];
+  
+  try {
+    if (platform === 'win32') {
+      // Windows用 - 複数のChromeパスを試行
+      const chromePaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe')
+      ];
+      
+      let chromeFound = false;
+      for (const chromePath of chromePaths) {
+        if (fs.existsSync(chromePath)) {
+          console.log(`Chrome起動: ${chromePath}`);
+          
+          const child = spawn(chromePath, chromeArgs, { 
+            detached: true, 
+            stdio: 'ignore' 
+          });
+          child.unref();
+          
+          chromeFound = true;
+          break;
+        }
+      }
+      
+      if (!chromeFound) {
+        console.log('Chromeが見つからないため、デフォルトブラウザで開きます');
+        const child = spawn('cmd', ['/c', 'start', '', url], { 
+          detached: true, 
+          stdio: 'ignore' 
+        });
+        child.unref();
+      }
+      
+    } else if (platform === 'darwin') {
+      // macOS用
+      console.log('macOS用のブラウザ起動');
+      const child = spawn('open', ['-n', '-a', 'Google Chrome', '--args', ...chromeArgs], { 
+        detached: true, 
+        stdio: 'ignore' 
+      });
+      child.unref();
+      
+    } else {
+      // Linux用
+      console.log('Linux用のブラウザ起動');
+      const child = spawn('google-chrome', chromeArgs, { 
+        detached: true, 
+        stdio: 'ignore' 
+      });
+      child.unref();
+    }
+    
+    console.log('✅ 新規ブラウザウィンドウを開きました');
+    return { success: true };
+    
+  } catch (error) {
+    console.error('❌ ブラウザ起動エラー:', error);
+    // フォールバック: shell.openExternalを使用
+    shell.openExternal(url);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('minimize-window', () => {
@@ -251,39 +499,148 @@ ipcMain.handle('close-window', () => {
   mainWindow.close();
 });
 
+
 // アラートの保存と読み込み
 function saveAlerts() {
-  const alertsPath = path.join(__dirname, 'alerts.json');
-  fs.writeFileSync(alertsPath, JSON.stringify(alerts, null, 2));
+  try {
+    const alertsPath = path.join(__dirname, 'alerts.json');
+    fs.writeFileSync(alertsPath, JSON.stringify(alerts, null, 2));
+  } catch (error) {
+    console.error('アラートの保存に失敗しました:', error);
+  }
 }
 
 function loadAlerts() {
-  const alertsPath = path.join(__dirname, 'alerts.json');
-  if (fs.existsSync(alertsPath)) {
-    const data = fs.readFileSync(alertsPath, 'utf8');
-    alerts = JSON.parse(data);
-    
-    // 期限切れのアラートを自動削除（繰り返しなしのもののみ）
-    const now = new Date();
-    const originalLength = alerts.length;
-    alerts = alerts.filter(alert => {
-      const alertTime = new Date(alert.dateTime);
-      // 繰り返しアラートまたは未来のアラートのみ保持
-      return (alert.repeatType && alert.repeatType !== 'none') || alertTime > now;
-    });
-    
-    // 削除されたアラートがあれば保存
-    if (alerts.length !== originalLength) {
-      saveAlerts();
-      console.log(`期限切れのアラートを${originalLength - alerts.length}個削除しました`);
+  try {
+    const alertsPath = path.join(__dirname, 'alerts.json');
+    if (fs.existsSync(alertsPath)) {
+      const data = fs.readFileSync(alertsPath, 'utf8');
+      alerts = JSON.parse(data);
+      
+      // 期限切れのアラートを自動削除（繰り返しなしのもののみ）
+      const now = new Date();
+      const originalLength = alerts.length;
+      alerts = alerts.filter(alert => {
+        const alertTime = new Date(alert.dateTime);
+        // 繰り返しアラートまたは未来のアラートのみ保持
+        return (alert.repeatType && alert.repeatType !== 'none') || alertTime > now;
+      });
+      
+      // 削除されたアラートがあれば保存
+      if (alerts.length !== originalLength) {
+        saveAlerts();
+        console.log(`期限切れのアラートを${originalLength - alerts.length}個削除しました`);
+      }
+      
+      // 既存のアラートのスケジュールを再設定
+      alerts.forEach(alert => {
+        if (new Date(alert.dateTime) > new Date()) {
+          scheduleNotification(alert);
+        }
+      });
+    }
+  } catch (error) {
+    console.error('アラートの読み込みに失敗しました:', error);
+    alerts = [];
+  }
+}
+
+// 新規ブラウザウィンドウを開く関数
+function openNewBrowserWindow(url) {
+  console.log('自動通知: 新規ブラウザウィンドウを開きます:', url);
+  
+  const platform = os.platform();
+  console.log(`Platform: ${platform}`);
+  
+  // 専用プロファイルディレクトリを作成
+  const userDataDir = path.join(os.homedir(), '.alerts-timeline-chrome-profile');
+  if (!fs.existsSync(userDataDir)) {
+    fs.mkdirSync(userDataDir, { recursive: true });
+    console.log(`Created profile directory: ${userDataDir}`);
+  }
+  
+  // 画面の中央にウィンドウを配置
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+  
+  const windowWidth = 1200;
+  const windowHeight = 800;
+  const centerX = Math.round((screenWidth - windowWidth) / 2);
+  const centerY = Math.round((screenHeight - windowHeight) / 2);
+  
+  const windowPosition = `${centerX},${centerY}`;
+  
+  const chromeArgs = [
+    '--new-window',
+    '--no-default-browser-check',
+    '--no-first-run', 
+    '--disable-default-apps',
+    `--user-data-dir=${userDataDir}`,
+    `--window-position=${windowPosition}`,
+    '--window-size=1200,800',
+    url
+  ];
+  
+  try {
+    if (platform === 'win32') {
+      // Windows用 - 複数のChromeパスを試行
+      const chromePaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe')
+      ];
+      
+      let chromeFound = false;
+      for (const chromePath of chromePaths) {
+        if (fs.existsSync(chromePath)) {
+          console.log(`自動通知 Chrome起動: ${chromePath}`);
+          
+          const child = spawn(chromePath, chromeArgs, { 
+            detached: true, 
+            stdio: 'ignore' 
+          });
+          child.unref();
+          
+          chromeFound = true;
+          break;
+        }
+      }
+      
+      if (!chromeFound) {
+        console.log('自動通知: Chromeが見つからないため、デフォルトブラウザで開きます');
+        const child = spawn('cmd', ['/c', 'start', '', url], { 
+          detached: true, 
+          stdio: 'ignore' 
+        });
+        child.unref();
+      }
+      
+    } else if (platform === 'darwin') {
+      // macOS用
+      console.log('自動通知: macOS用のブラウザ起動');
+      const child = spawn('open', ['-n', '-a', 'Google Chrome', '--args', ...chromeArgs], { 
+        detached: true, 
+        stdio: 'ignore' 
+      });
+      child.unref();
+      
+    } else {
+      // Linux用
+      console.log('自動通知: Linux用のブラウザ起動');
+      const child = spawn('google-chrome', chromeArgs, { 
+        detached: true, 
+        stdio: 'ignore' 
+      });
+      child.unref();
     }
     
-    // 既存のアラートのスケジュールを再設定
-    alerts.forEach(alert => {
-      if (new Date(alert.dateTime) > new Date()) {
-        scheduleNotification(alert);
-      }
-    });
+    console.log('✅ 自動通知: 新規ブラウザウィンドウを開きました');
+    
+  } catch (error) {
+    console.error('❌ 自動通知: ブラウザ起動エラー:', error);
+    // フォールバック: shell.openExternalを使用
+    shell.openExternal(url);
   }
 }
 
@@ -304,7 +661,7 @@ function scheduleNotification(alert) {
       
       // n分前通知の設定がない場合は、本番通知時にURLを開く
       if (alert.url && (!alert.reminderMinutes || alert.reminderMinutes === 0)) {
-        shell.openExternal(alert.url);
+        openNewBrowserWindow(alert.url);
       }
       
       // 繰り返し設定がある場合は次の通知をスケジュール
@@ -335,7 +692,7 @@ function scheduleNotification(alert) {
         
         // n分前通知が設定されている場合は、この時にURLを開く
         if (alert.url) {
-          shell.openExternal(alert.url);
+          openNewBrowserWindow(alert.url);
         }
       }, reminderDelay);
     }
@@ -389,5 +746,3 @@ function deleteExpiredAlert(id) {
   }
 }
 
-// アプリ起動時にアラートを読み込み
-loadAlerts();
