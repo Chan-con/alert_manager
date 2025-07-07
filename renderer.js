@@ -121,7 +121,7 @@ async function addAlert() {
         document.getElementById('alert-url').value = '';
         document.getElementById('reminder-minutes').value = '0';
         document.getElementById('repeat-type').value = 'none';
-        resetWeekdayOptions();
+        toggleWeekdayOptions();
         setDefaultDateTime();
         
         updateTimeline();
