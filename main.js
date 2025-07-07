@@ -169,16 +169,20 @@ function getAutoStartStatus() {
 
 // 設定を保存
 function saveSettings() {
-  const settingsPath = path.join(__dirname, 'settings.json');
+  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   const settings = {
     autoStartEnabled: autoStartEnabled
   };
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  } catch (error) {
+    console.error('設定の保存に失敗しました:', error);
+  }
 }
 
 // 設定を読み込み
 function loadSettings() {
-  const settingsPath = path.join(__dirname, 'settings.json');
+  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   if (fs.existsSync(settingsPath)) {
     try {
       const data = fs.readFileSync(settingsPath, 'utf8');
@@ -499,11 +503,24 @@ ipcMain.handle('close-window', () => {
   mainWindow.close();
 });
 
+ipcMain.handle('skip-alert', (event, id) => {
+  const alert = alerts.find(a => a.id === id);
+  if (!alert) return false;
+  
+  // 繰り返しアラートの場合は次回の時間に更新
+  if (alert.repeatType && alert.repeatType !== 'none') {
+    scheduleNextRepeat(alert);
+    return true;
+  }
+  
+  return false;
+});
+
 
 // アラートの保存と読み込み
 function saveAlerts() {
   try {
-    const alertsPath = path.join(__dirname, 'alerts.json');
+    const alertsPath = path.join(app.getPath('userData'), 'alerts.json');
     fs.writeFileSync(alertsPath, JSON.stringify(alerts, null, 2));
   } catch (error) {
     console.error('アラートの保存に失敗しました:', error);
@@ -512,7 +529,7 @@ function saveAlerts() {
 
 function loadAlerts() {
   try {
-    const alertsPath = path.join(__dirname, 'alerts.json');
+    const alertsPath = path.join(app.getPath('userData'), 'alerts.json');
     if (fs.existsSync(alertsPath)) {
       const data = fs.readFileSync(alertsPath, 'utf8');
       alerts = JSON.parse(data);
@@ -711,6 +728,9 @@ function scheduleNextRepeat(alert) {
     case 'weekly':
       nextTime.setDate(nextTime.getDate() + 7);
       break;
+    case 'weekdays':
+      nextTime = getNextWeekdayTime(currentTime, alert.weekdays);
+      break;
     case 'monthly':
       nextTime.setMonth(nextTime.getMonth() + 1);
       break;
@@ -734,6 +754,33 @@ function scheduleNextRepeat(alert) {
       mainWindow.webContents.send('alert-updated', updatedAlert);
     }
   }
+}
+
+// 次の指定曜日の時間を取得
+function getNextWeekdayTime(currentTime, weekdays) {
+  if (!weekdays || weekdays.length === 0) {
+    return new Date(currentTime.getTime() + 24 * 60 * 60 * 1000); // 1日後
+  }
+  
+  const now = new Date();
+  const baseTime = new Date(currentTime);
+  
+  // 今日から始まって、次の該当曜日を探す
+  for (let i = 1; i <= 7; i++) {
+    const testDate = new Date(baseTime.getTime() + (i * 24 * 60 * 60 * 1000));
+    const dayOfWeek = testDate.getDay();
+    
+    if (weekdays.includes(dayOfWeek)) {
+      // 同じ日の場合は、時間をチェック
+      if (i === 1 && testDate.getTime() <= now.getTime()) {
+        continue; // まだ時間が来ていない場合はスキップ
+      }
+      return testDate;
+    }
+  }
+  
+  // 見つからない場合は1週間後（フォールバック）
+  return new Date(baseTime.getTime() + 7 * 24 * 60 * 60 * 1000);
 }
 
 // 期限切れの通知を削除

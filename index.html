@@ -52,12 +52,26 @@
                         </select>
                     </div>
                     <div class="form-row">
-                        <select id="repeat-type" class="input-compact">
+                        <select id="repeat-type" class="input-compact" onchange="toggleWeekdayOptions()">
                             <option value="none">繰り返しなし</option>
                             <option value="daily">毎日</option>
                             <option value="weekly">毎週</option>
+                            <option value="weekdays">曜日指定</option>
                             <option value="monthly">毎月</option>
                         </select>
+                    </div>
+                    <div class="form-row weekday-options" id="weekday-options" style="display: none;">
+                        <div class="weekday-selector">
+                            <button type="button" class="weekday-btn" data-day="0">日</button>
+                            <button type="button" class="weekday-btn" data-day="1">月</button>
+                            <button type="button" class="weekday-btn" data-day="2">火</button>
+                            <button type="button" class="weekday-btn" data-day="3">水</button>
+                            <button type="button" class="weekday-btn" data-day="4">木</button>
+                            <button type="button" class="weekday-btn" data-day="5">金</button>
+                            <button type="button" class="weekday-btn" data-day="6">土</button>
+                        </div>
+                    </div>
+                    <div class="form-row">
                         <button class="add-btn-compact" onclick="addAlert()">追加</button>
                     </div>
                 </div>

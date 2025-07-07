@@ -85,6 +85,16 @@ async function addAlert() {
         return false;
     }
     
+    // 曜日指定の場合は選択された曜日をチェック
+    let selectedWeekdays = [];
+    if (repeatType === 'weekdays') {
+        selectedWeekdays = getSelectedWeekdays();
+        if (selectedWeekdays.length === 0) {
+            showCuteAlert('曜日を選択してください。', 'error');
+            return false;
+        }
+    }
+    
     const dateTime = new Date(`${date}T${time}`);
     
     if (dateTime <= new Date()) {
@@ -98,6 +108,7 @@ async function addAlert() {
         url: url || null,
         reminderMinutes: reminderMinutes > 0 ? reminderMinutes : null,
         repeatType: repeatType || 'none',
+        weekdays: selectedWeekdays.length > 0 ? selectedWeekdays : null,
         createdAt: new Date().toISOString()
     };
     
@@ -110,6 +121,7 @@ async function addAlert() {
         document.getElementById('alert-url').value = '';
         document.getElementById('reminder-minutes').value = '0';
         document.getElementById('repeat-type').value = 'none';
+        resetWeekdayOptions();
         setDefaultDateTime();
         
         updateTimeline();
@@ -315,6 +327,7 @@ function updateTimeline() {
                     <div class="alert-header">
                         <div class="alert-time">${timeString}</div>
                         <div class="alert-actions">
+                            ${alert.repeatType && alert.repeatType !== 'none' ? `<button class="skip-btn" onclick="skipAlert('${alert.id}')" title="この回をスキップ">⏭️</button>` : ''}
                             <button class="edit-btn" onclick="editAlert('${alert.id}')" title="編集">✏️</button>
                             <button class="delete-btn" onclick="deleteAlert('${alert.id}')" title="削除">×</button>
                         </div>
@@ -323,7 +336,7 @@ function updateTimeline() {
                     ${alert.url ? `<div class="alert-url"><span class="url-icon">🔗</span><a href="#" onclick="openLink('${alert.url}')" title="${alert.url}">${alert.url}</a></div>` : ''}
                     <div class="alert-details">
                         ${alert.reminderMinutes ? `<span class="alert-reminder">📢 ${alert.reminderMinutes}分前にお知らせ</span>` : ''}
-                        ${alert.repeatType && alert.repeatType !== 'none' ? `<span class="alert-repeat">🔄 ${getRepeatText(alert.repeatType)}</span>` : ''}
+                        ${alert.repeatType && alert.repeatType !== 'none' ? `<span class="alert-repeat">🔄 ${getRepeatText(alert.repeatType, alert.weekdays)}</span>` : ''}
                     </div>
                 </div>
             </div>
@@ -356,10 +369,15 @@ function formatDateTime(date) {
 }
 
 // 繰り返しタイプのテキストを取得
-function getRepeatText(repeatType) {
+function getRepeatText(repeatType, weekdays) {
     switch (repeatType) {
         case 'daily': return '毎日';
         case 'weekly': return '毎週';
+        case 'weekdays': {
+            if (!weekdays || weekdays.length === 0) return '曜日指定';
+            const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+            return weekdays.map(day => dayNames[day]).join('・');
+        }
         case 'monthly': return '毎月';
         default: return '';
     }
@@ -590,3 +608,60 @@ window.addAlert = async function() {
     }
     return result;
 };
+
+// 曜日選択の表示/非表示を切り替え
+function toggleWeekdayOptions() {
+    const repeatType = document.getElementById('repeat-type').value;
+    const weekdayOptions = document.getElementById('weekday-options');
+    
+    if (repeatType === 'weekdays') {
+        weekdayOptions.style.display = 'block';
+    } else {
+        weekdayOptions.style.display = 'none';
+        resetWeekdayOptions();
+    }
+}
+
+// 曜日選択をリセット
+function resetWeekdayOptions() {
+    const weekdayBtns = document.querySelectorAll('#weekday-options .weekday-btn');
+    weekdayBtns.forEach(btn => {
+        btn.classList.remove('active');
+    });
+}
+
+// 選択された曜日を取得
+function getSelectedWeekdays() {
+    const weekdayBtns = document.querySelectorAll('#weekday-options .weekday-btn.active');
+    return Array.from(weekdayBtns).map(btn => parseInt(btn.dataset.day));
+}
+
+// アラートをスキップ
+async function skipAlert(id) {
+    const confirmed = await showCuteConfirmDialog('この通知をスキップしますか？', 'この回の通知をスキップして次回の予定に進みます。');
+    if (!confirmed) {
+        return;
+    }
+    
+    try {
+        await ipcRenderer.invoke('skip-alert', id);
+        await loadAlerts();
+        updateTimeline();
+        
+        console.log('アラートをスキップしました:', id);
+    } catch (error) {
+        console.error('アラートスキップエラー:', error);
+        showCuteAlert('アラートのスキップに失敗しました。', 'error');
+    }
+}
+
+// DOM読み込み後に曜日ボタンのイベントリスナーを設定
+document.addEventListener('DOMContentLoaded', function() {
+    // 曜日ボタンのクリックイベント
+    const weekdayBtns = document.querySelectorAll('#weekday-options .weekday-btn');
+    weekdayBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.classList.toggle('active');
+        });
+    });
+});
