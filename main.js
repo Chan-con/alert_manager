@@ -12,6 +12,7 @@ let tray = null;
 let autoStartEnabled = false;
 let expressApp;
 let serverPort = 3000;
+let alertTimers = new Map(); // アラートのタイマーIDを管理
 
 // 二重起動を防止
 const gotTheLock = app.requestSingleInstanceLock();
@@ -390,6 +391,7 @@ ipcMain.handle('edit-alert', (event, id, updatedAlert) => {
 });
 
 ipcMain.handle('delete-alert', (event, id) => {
+  clearAlertTimers(id);
   alerts = alerts.filter(alert => alert.id !== id);
   saveAlerts();
   return true;
@@ -663,12 +665,15 @@ function openNewBrowserWindow(url) {
 
 // 通知のスケジュール
 function scheduleNotification(alert) {
+  // 既存のタイマーをクリア
+  clearAlertTimers(alert.id);
+  
   const alertTime = new Date(alert.dateTime);
   const now = new Date();
   
   if (alertTime > now) {
     const delay = alertTime.getTime() - now.getTime();
-    setTimeout(() => {
+    const mainTimer = setTimeout(() => {
       // 通知を表示
       new Notification({
         title: '通知',
@@ -688,11 +693,23 @@ function scheduleNotification(alert) {
       
       // 繰り返しなしの場合は終了後に自動削除
       if (!alert.repeatType || alert.repeatType === 'none') {
-        setTimeout(() => {
+        const deleteTimer = setTimeout(() => {
           deleteExpiredAlert(alert.id);
         }, 5000); // 5秒後に削除
+        
+        // 削除タイマーも保存
+        if (!alertTimers.has(alert.id)) {
+          alertTimers.set(alert.id, []);
+        }
+        alertTimers.get(alert.id).push(deleteTimer);
       }
     }, delay);
+    
+    // メインタイマーを保存
+    if (!alertTimers.has(alert.id)) {
+      alertTimers.set(alert.id, []);
+    }
+    alertTimers.get(alert.id).push(mainTimer);
   }
   
   // n分前の通知
@@ -700,7 +717,7 @@ function scheduleNotification(alert) {
     const reminderTime = new Date(alertTime.getTime() - (alert.reminderMinutes * 60000));
     if (reminderTime > now) {
       const reminderDelay = reminderTime.getTime() - now.getTime();
-      setTimeout(() => {
+      const reminderTimer = setTimeout(() => {
         new Notification({
           title: `${alert.reminderMinutes}分前のお知らせ`,
           body: alert.content,
@@ -712,6 +729,12 @@ function scheduleNotification(alert) {
           openNewBrowserWindow(alert.url);
         }
       }, reminderDelay);
+      
+      // リマインダータイマーも保存
+      if (!alertTimers.has(alert.id)) {
+        alertTimers.set(alert.id, []);
+      }
+      alertTimers.get(alert.id).push(reminderTimer);
     }
   }
 }
@@ -746,12 +769,16 @@ function scheduleNextRepeat(alert) {
   
   const index = alerts.findIndex(a => a.id === alert.id);
   if (index !== -1) {
-    alerts[index] = updatedAlert;
-    saveAlerts();
-    scheduleNotification(updatedAlert);
-    // レンダラープロセスに更新を通知
-    if (mainWindow) {
-      mainWindow.webContents.send('alert-updated', updatedAlert);
+    // 削除されたアラートが再スケジュールされないように確認
+    const existingAlert = alerts[index];
+    if (existingAlert && existingAlert.id === alert.id) {
+      alerts[index] = updatedAlert;
+      saveAlerts();
+      scheduleNotification(updatedAlert);
+      // レンダラープロセスに更新を通知
+      if (mainWindow) {
+        mainWindow.webContents.send('alert-updated', updatedAlert);
+      }
     }
   }
 }
@@ -783,8 +810,18 @@ function getNextWeekdayTime(currentTime, weekdays) {
   return new Date(baseTime.getTime() + 7 * 24 * 60 * 60 * 1000);
 }
 
+// アラートのタイマーをクリア
+function clearAlertTimers(alertId) {
+  if (alertTimers.has(alertId)) {
+    const timers = alertTimers.get(alertId);
+    timers.forEach(timer => clearTimeout(timer));
+    alertTimers.delete(alertId);
+  }
+}
+
 // 期限切れの通知を削除
 function deleteExpiredAlert(id) {
+  clearAlertTimers(id);
   alerts = alerts.filter(alert => alert.id !== id);
   saveAlerts();
   // レンダラープロセスに削除を通知
