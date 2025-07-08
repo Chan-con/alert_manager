@@ -11,6 +11,7 @@
         <!-- ヘッダー部分 -->
         <div class="header">
             <div class="window-controls">
+                <button class="control-btn settings-btn" onclick="openSettings()">⚙️</button>
                 <button class="control-btn close-btn" onclick="closeWindow()">×</button>
             </div>
         </div>
@@ -112,6 +113,42 @@
                     <div class="form-row">
                         <button class="add-btn-compact" onclick="addAlert()">追加</button>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 設定ウィンドウ -->
+    <div class="settings-modal" id="settings-modal">
+        <div class="settings-modal-content">
+            <div class="settings-header">
+                <h3>設定</h3>
+                <button class="settings-close-btn" onclick="closeSettings()">×</button>
+            </div>
+            <div class="settings-body">
+                <div class="settings-section">
+                    <h4>ホットキー設定</h4>
+                    <div class="settings-item">
+                        <label for="timeline-hotkey">タイムラインウィンドウの表示/非表示</label>
+                        <div class="hotkey-input-group">
+                            <input type="text" id="timeline-hotkey" class="hotkey-input" readonly placeholder="クリックしてホットキーを設定してください">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>起動設定</h4>
+                    <div class="settings-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="auto-start-checkbox" class="settings-checkbox">
+                            <span class="checkbox-custom"></span>
+                            PC起動時に自動起動する
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-footer">
+                    <button class="save-settings-btn" onclick="saveSettings()">保存</button>
+                    <button class="cancel-settings-btn" onclick="closeSettings()">キャンセル</button>
                 </div>
             </div>
         </div>

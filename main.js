@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Notification, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification, Tray, Menu, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
@@ -13,6 +13,13 @@ let autoStartEnabled = false;
 let expressApp;
 let serverPort = 3000;
 let alertTimers = new Map(); // アラートのタイマーIDを管理
+let globalSettings = {
+  timelineHotkey: null
+};
+
+let currentGlobalShortcut = null;
+let isSettingsWindowOpen = false;
+let isCapturingHotkey = false;
 
 // 二重起動を防止
 const gotTheLock = app.requestSingleInstanceLock();
@@ -109,32 +116,6 @@ function createTray() {
 function updateTrayMenu() {
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: '表示',
-      click: () => {
-        mainWindow.show();
-      }
-    },
-    {
-      label: '非表示',
-      click: () => {
-        mainWindow.hide();
-      }
-    },
-    {
-      type: 'separator'
-    },
-    {
-      label: 'PC起動時に自動開始',
-      type: 'checkbox',
-      checked: autoStartEnabled,
-      click: () => {
-        toggleAutoStart();
-      }
-    },
-    {
-      type: 'separator'
-    },
-    {
       label: '終了',
       click: () => {
         app.isQuiting = true;
@@ -161,21 +142,22 @@ function toggleAutoStart() {
   updateTrayMenu();
 }
 
-// 現在の自動起動状態を取得
+// 現在の自動起動状態を取得（設定を上書きしない）
 function getAutoStartStatus() {
   const loginItemSettings = app.getLoginItemSettings();
-  autoStartEnabled = loginItemSettings.openAtLogin;
-  return autoStartEnabled;
+  return loginItemSettings.openAtLogin;
 }
 
 // 設定を保存
 function saveSettings() {
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   const settings = {
-    autoStartEnabled: autoStartEnabled
+    autoStartEnabled: autoStartEnabled,
+    timelineHotkey: globalSettings.timelineHotkey || null
   };
   try {
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    console.log('設定を保存しました:', settings);
   } catch (error) {
     console.error('設定の保存に失敗しました:', error);
   }
@@ -184,19 +166,147 @@ function saveSettings() {
 // 設定を読み込み
 function loadSettings() {
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  
+  // 現在のシステム設定を取得
+  const systemAutoStart = getAutoStartStatus();
+  
   if (fs.existsSync(settingsPath)) {
     try {
       const data = fs.readFileSync(settingsPath, 'utf8');
       const settings = JSON.parse(data);
-      autoStartEnabled = settings.autoStartEnabled || false;
+      
+      // 設定ファイルに autoStartEnabled が明示的に設定されている場合はそれを使用
+      // 設定されていない場合は現在のシステム設定を使用
+      autoStartEnabled = settings.autoStartEnabled !== undefined ? settings.autoStartEnabled : systemAutoStart;
+      globalSettings.timelineHotkey = settings.timelineHotkey || null;
+      
+      console.log('設定ファイルから読み込み:', {
+        autoStartEnabled,
+        timelineHotkey: globalSettings.timelineHotkey
+      });
     } catch (error) {
       console.error('設定読み込みエラー:', error);
-      autoStartEnabled = false;
+      autoStartEnabled = systemAutoStart; // エラー時は現在のシステム設定を使用
+      globalSettings.timelineHotkey = null;
     }
+  } else {
+    // 設定ファイルが存在しない場合は現在のシステム設定を使用
+    autoStartEnabled = systemAutoStart;
+    globalSettings.timelineHotkey = null;
+    console.log('設定ファイルが存在しないため、システム設定を使用:', autoStartEnabled);
   }
   
-  // 現在のシステム設定と同期
-  getAutoStartStatus();
+  console.log('システムの自動起動状態:', systemAutoStart);
+  console.log('最終的な自動起動状態:', autoStartEnabled);
+  
+  // 設定ファイルの値を優先し、必要に応じてシステム設定を同期
+  if (autoStartEnabled !== systemAutoStart) {
+    console.log('設定ファイルとシステム設定が異なるため、システム設定を更新します');
+    app.setLoginItemSettings({
+      openAtLogin: autoStartEnabled,
+      openAsHidden: true,
+      path: process.execPath,
+      args: ['--hidden']
+    });
+  }
+  
+  // グローバルショートカットを設定
+  updateGlobalShortcut();
+}
+
+// ホットキーをElectronのAccelerator形式に変換
+function convertToAccelerator(hotkey) {
+  if (!hotkey) return null;
+  
+  const parts = [];
+  if (hotkey.ctrl) parts.push('CommandOrControl');
+  if (hotkey.alt) parts.push('Alt');
+  if (hotkey.shift) parts.push('Shift');
+  
+  // キーを適切な形式に変換
+  let key = hotkey.key;
+  
+  // 特殊キーの変換
+  const keyMap = {
+    ' ': 'Space',
+    'Enter': 'Return',
+    'Escape': 'Escape',
+    'Tab': 'Tab',
+    'Backspace': 'BackSpace',
+    'Delete': 'Delete',
+    'Insert': 'Insert',
+    'Home': 'Home',
+    'End': 'End',
+    'PageUp': 'PageUp',
+    'PageDown': 'PageDown',
+    'ArrowUp': 'Up',
+    'ArrowDown': 'Down',
+    'ArrowLeft': 'Left',
+    'ArrowRight': 'Right',
+    'F1': 'F1', 'F2': 'F2', 'F3': 'F3', 'F4': 'F4',
+    'F5': 'F5', 'F6': 'F6', 'F7': 'F7', 'F8': 'F8',
+    'F9': 'F9', 'F10': 'F10', 'F11': 'F11', 'F12': 'F12'
+  };
+  
+  if (keyMap[key]) {
+    key = keyMap[key];
+  } else if (key.length === 1) {
+    key = key.toUpperCase();
+  }
+  
+  parts.push(key);
+  
+  return parts.join('+');
+}
+
+// グローバルショートカットを更新
+function updateGlobalShortcut() {
+  // 既存のショートカットを解除
+  if (currentGlobalShortcut) {
+    try {
+      globalShortcut.unregister(currentGlobalShortcut);
+      console.log('既存のグローバルショートカットを解除しました:', currentGlobalShortcut);
+    } catch (error) {
+      console.error('グローバルショートカットの解除に失敗しました:', error);
+    }
+    currentGlobalShortcut = null;
+  }
+  
+  // 新しいショートカットを登録
+  if (globalSettings.timelineHotkey) {
+    const accelerator = convertToAccelerator(globalSettings.timelineHotkey);
+    if (accelerator) {
+      try {
+        const success = globalShortcut.register(accelerator, () => {
+          console.log('グローバルホットキーが押されました:', accelerator);
+          
+          // 設定ウィンドウが開いている場合やキャプチャ中の場合は無視
+          if (isSettingsWindowOpen || isCapturingHotkey) {
+            console.log('設定ウィンドウが開いているかキャプチャ中のため、ホットキーを無視します');
+            return;
+          }
+          
+          if (mainWindow) {
+            if (mainWindow.isVisible()) {
+              mainWindow.hide();
+            } else {
+              mainWindow.show();
+              mainWindow.focus();
+            }
+          }
+        });
+        
+        if (success) {
+          currentGlobalShortcut = accelerator;
+          console.log('グローバルショートカットを登録しました:', accelerator);
+        } else {
+          console.error('グローバルショートカットの登録に失敗しました:', accelerator);
+        }
+      } catch (error) {
+        console.error('グローバルショートカット登録エラー:', error);
+      }
+    }
+  }
 }
 
 // Expressサーバーを起動
@@ -366,6 +476,11 @@ app.on('before-quit', () => {
   saveSettings();
 });
 
+// アプリ終了時にグローバルショートカットを解除
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
 // IPC通信の設定
 ipcMain.handle('get-alerts', () => {
   return alerts;
@@ -516,6 +631,121 @@ ipcMain.handle('skip-alert', (event, id) => {
   }
   
   return false;
+});
+
+ipcMain.handle('toggle-window', () => {
+  if (mainWindow.isVisible()) {
+    mainWindow.hide();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
+
+ipcMain.handle('save-settings', (event, settings) => {
+  try {
+    console.log('設定を保存中:', settings);
+    globalSettings.timelineHotkey = settings.timelineHotkey;
+    
+    // 自動起動設定を更新
+    if (settings.autoStartEnabled !== undefined) {
+      autoStartEnabled = settings.autoStartEnabled;
+      app.setLoginItemSettings({
+        openAtLogin: autoStartEnabled,
+        openAsHidden: true,
+        path: process.execPath,
+        args: ['--hidden']
+      });
+      console.log('自動起動設定を更新しました:', autoStartEnabled);
+    }
+    
+    saveSettings();
+    
+    // グローバルショートカットを更新
+    updateGlobalShortcut();
+    
+    return { success: true };
+  } catch (error) {
+    console.error('設定の保存に失敗しました:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('load-settings', () => {
+  try {
+    return {
+      success: true,
+      settings: {
+        timelineHotkey: globalSettings.timelineHotkey,
+        autoStartEnabled: autoStartEnabled
+      }
+    };
+  } catch (error) {
+    console.error('設定の読み込みに失敗しました:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('settings-window-opened', () => {
+  isSettingsWindowOpen = true;
+  console.log('設定ウィンドウが開かれました - グローバルホットキーを無効化');
+});
+
+ipcMain.handle('settings-window-closed', () => {
+  isSettingsWindowOpen = false;
+  console.log('設定ウィンドウが閉じられました - グローバルホットキーを有効化');
+});
+
+ipcMain.handle('hotkey-capture-started', () => {
+  isCapturingHotkey = true;
+  console.log('ホットキーキャプチャが開始されました - グローバルホットキーを一時的に解除');
+  
+  // 既存のグローバルショートカットを一時的に解除
+  if (currentGlobalShortcut) {
+    try {
+      globalShortcut.unregister(currentGlobalShortcut);
+      console.log('グローバルショートカットを一時的に解除しました:', currentGlobalShortcut);
+    } catch (error) {
+      console.error('グローバルショートカットの解除に失敗しました:', error);
+    }
+  }
+});
+
+ipcMain.handle('hotkey-capture-stopped', () => {
+  isCapturingHotkey = false;
+  console.log('ホットキーキャプチャが停止されました - グローバルホットキーを再登録');
+  
+  // グローバルショートカットを再登録
+  if (globalSettings.timelineHotkey && currentGlobalShortcut) {
+    try {
+      const success = globalShortcut.register(currentGlobalShortcut, () => {
+        console.log('グローバルホットキーが押されました:', currentGlobalShortcut);
+        
+        // 設定ウィンドウが開いている場合やキャプチャ中の場合は無視
+        if (isSettingsWindowOpen || isCapturingHotkey) {
+          console.log('設定ウィンドウが開いているかキャプチャ中のため、ホットキーを無視します');
+          return;
+        }
+        
+        if (mainWindow) {
+          if (mainWindow.isVisible()) {
+            mainWindow.hide();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        }
+      });
+      
+      if (success) {
+        console.log('グローバルショートカットを再登録しました:', currentGlobalShortcut);
+      } else {
+        console.error('グローバルショートカットの再登録に失敗しました:', currentGlobalShortcut);
+      }
+    } catch (error) {
+      console.error('グローバルショートカット再登録エラー:', error);
+    }
+  }
 });
 
 

@@ -441,10 +441,10 @@ document.addEventListener('keydown', (e) => {
         addAlert();
     }
     
-    // ESCキーでウインドウを閉じる
-    if (e.key === 'Escape') {
-        closeWindow();
-    }
+    // ESCキーでウインドウを閉じる機能を無効化
+    // if (e.key === 'Escape') {
+    //     closeWindow();
+    // }
 });
 
 // フォームトグル機能
@@ -462,6 +462,11 @@ function toggleForm() {
         toggleBtn.querySelector('.toggle-text').textContent = '閉じる';
         // フォームを開いた時に現在の日付と時刻を設定
         setDefaultDateTime();
+        
+        // フォームのスクロール位置を一番上に戻す
+        setTimeout(() => {
+            formContent.scrollTop = 0;
+        }, 50); // アニメーション後にスクロール
     } else {
         formContent.classList.remove('active');
         toggleBtn.classList.remove('active');
@@ -716,4 +721,298 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.classList.toggle('active');
         });
     });
+    
+    // 設定を読み込み
+    loadSettingsFromStorage();
+    
+    // ホットキー入力のクリックイベントを設定
+    const hotkeyInput = document.getElementById('timeline-hotkey');
+    hotkeyInput.addEventListener('click', captureHotkey);
 });
+
+// 設定ウィンドウ関連の変数
+let currentSettings = {
+    timelineHotkey: null,
+    autoStartEnabled: false
+};
+
+let isCapturingHotkey = false;
+
+// 設定ウィンドウを開く
+async function openSettings() {
+    // キャプチャ中の場合は停止
+    if (isCapturingHotkey) {
+        await stopHotkeyCapture();
+    }
+    
+    const settingsModal = document.getElementById('settings-modal');
+    settingsModal.classList.add('show');
+    
+    // メインプロセスに設定ウィンドウが開いたことを通知
+    try {
+        await ipcRenderer.invoke('settings-window-opened');
+    } catch (error) {
+        console.error('設定ウィンドウ開放通知エラー:', error);
+    }
+    
+    // 現在の設定を表示
+    updateSettingsDisplay();
+}
+
+// 設定ウィンドウを閉じる
+async function closeSettings() {
+    const settingsModal = document.getElementById('settings-modal');
+    settingsModal.classList.remove('show');
+    
+    // キャプチャ中の場合は停止
+    if (isCapturingHotkey) {
+        await stopHotkeyCapture();
+    }
+    
+    // メインプロセスに設定ウィンドウが閉じたことを通知
+    try {
+        await ipcRenderer.invoke('settings-window-closed');
+    } catch (error) {
+        console.error('設定ウィンドウ閉鎖通知エラー:', error);
+    }
+}
+
+// 設定表示を更新
+function updateSettingsDisplay() {
+    const hotkeyInput = document.getElementById('timeline-hotkey');
+    const autoStartCheckbox = document.getElementById('auto-start-checkbox');
+    
+    if (currentSettings.timelineHotkey) {
+        hotkeyInput.value = formatHotkey(currentSettings.timelineHotkey);
+    } else {
+        hotkeyInput.value = '';
+    }
+    
+    autoStartCheckbox.checked = currentSettings.autoStartEnabled || false;
+}
+
+// ホットキーをフォーマット
+function formatHotkey(hotkey) {
+    if (!hotkey) return '';
+    
+    const parts = [];
+    if (hotkey.ctrl) parts.push('Ctrl');
+    if (hotkey.alt) parts.push('Alt');
+    if (hotkey.shift) parts.push('Shift');
+    if (hotkey.key) parts.push(hotkey.key.toUpperCase());
+    
+    return parts.join(' + ');
+}
+
+// ホットキーキャプチャを開始
+async function captureHotkey() {
+    console.log('=== ホットキーキャプチャ開始 ===');
+    const hotkeyInput = document.getElementById('timeline-hotkey');
+    
+    if (isCapturingHotkey) {
+        console.log('既にキャプチャ中です - 停止します');
+        stopHotkeyCapture();
+        return;
+    }
+    
+    isCapturingHotkey = true;
+    hotkeyInput.classList.add('capturing');
+    hotkeyInput.value = 'キーを押してください... (ESC でキャンセル)';
+    hotkeyInput.focus();
+    
+    console.log('キャプチャ状態を開始に設定:', isCapturingHotkey);
+    
+    // メインプロセスにキャプチャ開始を通知（既存のグローバルショートカットを一時的に無効化）
+    try {
+        await ipcRenderer.invoke('hotkey-capture-started');
+        console.log('メインプロセスにキャプチャ開始を通知しました');
+    } catch (error) {
+        console.error('ホットキーキャプチャ開始通知エラー:', error);
+    }
+    
+    // キーボードイベントリスナーを追加
+    document.addEventListener('keydown', handleHotkeyCapture);
+    document.addEventListener('keyup', handleHotkeyKeyUp);
+    console.log('キーボードイベントリスナーを追加しました');
+}
+
+// ホットキーキャプチャを停止
+async function stopHotkeyCapture() {
+    const hotkeyInput = document.getElementById('timeline-hotkey');
+    
+    isCapturingHotkey = false;
+    hotkeyInput.classList.remove('capturing');
+    hotkeyInput.blur();
+    
+    // メインプロセスにキャプチャ停止を通知
+    try {
+        await ipcRenderer.invoke('hotkey-capture-stopped');
+    } catch (error) {
+        console.error('ホットキーキャプチャ停止通知エラー:', error);
+    }
+    
+    document.removeEventListener('keydown', handleHotkeyCapture);
+    document.removeEventListener('keyup', handleHotkeyKeyUp);
+    updateSettingsDisplay();
+}
+
+// ホットキーキャプチャハンドラー
+async function handleHotkeyCapture(event) {
+    console.log('=== キーイベント発火 ===');
+    console.log('キー:', event.key);
+    console.log('修飾キー - Ctrl:', event.ctrlKey, 'Alt:', event.altKey, 'Shift:', event.shiftKey);
+    
+    event.preventDefault();
+    
+    const hotkeyInput = document.getElementById('timeline-hotkey');
+    
+    // ESCキーでキャンセル
+    if (event.key === 'Escape') {
+        console.log('ESCキーが押されました - キャプチャを停止');
+        await stopHotkeyCapture();
+        return;
+    }
+    
+    // 修飾キーのみの場合は、現在の組み合わせを表示するが登録はしない
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) {
+        console.log('修飾キーのみが押されました:', event.key);
+        // 現在押されている修飾キーを表示
+        const parts = [];
+        if (event.ctrlKey) parts.push('Ctrl');
+        if (event.altKey) parts.push('Alt');
+        if (event.shiftKey) parts.push('Shift');
+        if (parts.length > 0) {
+            hotkeyInput.value = parts.join(' + ') + ' + ?';
+            console.log('表示更新:', hotkeyInput.value);
+        }
+        return;
+    }
+    
+    console.log('通常のキーが押されました - ホットキーとして処理します');
+    
+    // ホットキーを作成
+    const hotkey = {
+        ctrl: event.ctrlKey,
+        alt: event.altKey,
+        shift: event.shiftKey,
+        key: event.key
+    };
+    
+    console.log('キャプチャされたホットキー:', hotkey);
+    console.log('現在の設定:', currentSettings.timelineHotkey);
+    
+    // 既存のホットキーと同じかチェック
+    const isSameHotkey = currentSettings.timelineHotkey && 
+                        currentSettings.timelineHotkey.ctrl === hotkey.ctrl &&
+                        currentSettings.timelineHotkey.alt === hotkey.alt &&
+                        currentSettings.timelineHotkey.shift === hotkey.shift &&
+                        currentSettings.timelineHotkey.key === hotkey.key;
+    
+    console.log('同じホットキーか:', isSameHotkey);
+    
+    if (isSameHotkey) {
+        // 既存のホットキーと同じ場合
+        hotkeyInput.value = formatHotkey(hotkey) + ' ✓ すでに登録済みのキーです';
+        hotkeyInput.style.color = '#4CAF50';
+        hotkeyInput.style.fontWeight = 'bold';
+        
+        // 2秒後に通常の表示に戻す
+        setTimeout(() => {
+            hotkeyInput.value = formatHotkey(hotkey);
+            hotkeyInput.style.color = '#333';
+            hotkeyInput.style.fontWeight = 'normal';
+        }, 2000);
+    } else {
+        // 新しいホットキーの場合
+        currentSettings.timelineHotkey = hotkey;
+        hotkeyInput.value = formatHotkey(hotkey) + ' ✨ 新しく設定されました';
+        hotkeyInput.style.color = '#ff9ff3';
+        hotkeyInput.style.fontWeight = 'bold';
+        
+        // 2秒後に通常の表示に戻す
+        setTimeout(() => {
+            hotkeyInput.value = formatHotkey(hotkey);
+            hotkeyInput.style.color = '#333';
+            hotkeyInput.style.fontWeight = 'normal';
+        }, 2000);
+    }
+    
+    await stopHotkeyCapture();
+}
+
+// ホットキーキャプチャ中のキーアップハンドラー
+function handleHotkeyKeyUp(event) {
+    // 修飾キーが離された場合は表示を更新
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) {
+        const hotkeyInput = document.getElementById('timeline-hotkey');
+        
+        // 現在押されている修飾キーを取得
+        const parts = [];
+        if (event.ctrlKey && event.key !== 'Control') parts.push('Ctrl');
+        if (event.altKey && event.key !== 'Alt') parts.push('Alt');
+        if (event.shiftKey && event.key !== 'Shift') parts.push('Shift');
+        
+        if (parts.length > 0) {
+            hotkeyInput.value = parts.join(' + ') + ' + ?';
+        } else {
+            hotkeyInput.value = 'キーを押してください... (ESC でキャンセル)';
+        }
+    }
+}
+
+// 設定を保存
+async function saveSettings() {
+    try {
+        // 自動起動設定を取得
+        const autoStartCheckbox = document.getElementById('auto-start-checkbox');
+        currentSettings.autoStartEnabled = autoStartCheckbox.checked;
+        
+        const result = await ipcRenderer.invoke('save-settings', currentSettings);
+        if (result.success) {
+            // グローバルホットキーを更新
+            updateGlobalHotkeys();
+            
+            showCuteAlert('設定を保存しました。', 'info');
+            
+            // 設定ウィンドウを閉じる前に通知
+            await closeSettings();
+        } else {
+            showCuteAlert('設定の保存に失敗しました。', 'error');
+        }
+    } catch (error) {
+        console.error('設定の保存に失敗しました:', error);
+        showCuteAlert('設定の保存に失敗しました。', 'error');
+    }
+}
+
+// ストレージから設定を読み込み
+async function loadSettingsFromStorage() {
+    try {
+        console.log('=== 設定を読み込み中 ===');
+        const result = await ipcRenderer.invoke('load-settings');
+        console.log('設定読み込み結果:', result);
+        if (result.success) {
+            currentSettings = result.settings;
+            console.log('現在の設定:', currentSettings);
+            updateGlobalHotkeys();
+        }
+    } catch (error) {
+        console.error('設定の読み込みに失敗しました:', error);
+    }
+}
+
+// グローバルホットキーを更新（メインプロセスで処理されるため、何もしない）
+function updateGlobalHotkeys() {
+    // メインプロセスでグローバルショートカットが処理されるため、
+    // レンダラープロセスでは何も行わない
+}
+
+// タイムラインウィンドウの表示/非表示をトグル
+async function toggleTimelineWindow() {
+    try {
+        await ipcRenderer.invoke('toggle-window');
+    } catch (error) {
+        console.error('ウィンドウトグルエラー:', error);
+    }
+}
+
