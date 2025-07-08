@@ -811,3 +811,56 @@ body {
     transform: scale(1.1);
     box-shadow: 0 4px 12px rgba(255, 159, 243, 0.6);
 }
+
+/* 日付選択ボタン */
+.date-options {
+    margin-top: 8px;
+}
+
+.date-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    max-width: 280px;
+    margin: 0 auto;
+}
+
+.date-btn {
+    width: 36px;
+    height: 36px;
+    border: 2px solid #e8f4ff;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.9);
+    color: #6b73ff;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.date-btn:hover {
+    transform: scale(1.1);
+    border-color: #ff9ff3;
+}
+
+.date-btn.active {
+    background: linear-gradient(135deg, #ff9ff3 0%, #6b73ff 100%);
+    color: white;
+    border-color: #ff9ff3;
+    box-shadow: 0 2px 8px rgba(255, 159, 243, 0.4);
+}
+
+.date-btn.active:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(255, 159, 243, 0.6);
+}

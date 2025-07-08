@@ -52,12 +52,13 @@
                         </select>
                     </div>
                     <div class="form-row">
-                        <select id="repeat-type" class="input-compact" onchange="toggleWeekdayOptions()">
+                        <select id="repeat-type" class="input-compact" onchange="toggleRepeatOptions()">
                             <option value="none">繰り返しなし</option>
                             <option value="daily">毎日</option>
                             <option value="weekly">毎週</option>
                             <option value="weekdays">曜日指定</option>
                             <option value="monthly">毎月</option>
+                            <option value="monthly-dates">毎月（日付指定）</option>
                         </select>
                     </div>
                     <div class="form-row weekday-options" id="weekday-options" style="display: none;">
@@ -69,6 +70,43 @@
                             <button type="button" class="weekday-btn" data-day="4">木</button>
                             <button type="button" class="weekday-btn" data-day="5">金</button>
                             <button type="button" class="weekday-btn" data-day="6">土</button>
+                        </div>
+                    </div>
+                    <div class="form-row date-options" id="date-options" style="display: none;">
+                        <div class="date-selector">
+                            <div class="calendar-grid">
+                                <button type="button" class="date-btn" data-date="1">1</button>
+                                <button type="button" class="date-btn" data-date="2">2</button>
+                                <button type="button" class="date-btn" data-date="3">3</button>
+                                <button type="button" class="date-btn" data-date="4">4</button>
+                                <button type="button" class="date-btn" data-date="5">5</button>
+                                <button type="button" class="date-btn" data-date="6">6</button>
+                                <button type="button" class="date-btn" data-date="7">7</button>
+                                <button type="button" class="date-btn" data-date="8">8</button>
+                                <button type="button" class="date-btn" data-date="9">9</button>
+                                <button type="button" class="date-btn" data-date="10">10</button>
+                                <button type="button" class="date-btn" data-date="11">11</button>
+                                <button type="button" class="date-btn" data-date="12">12</button>
+                                <button type="button" class="date-btn" data-date="13">13</button>
+                                <button type="button" class="date-btn" data-date="14">14</button>
+                                <button type="button" class="date-btn" data-date="15">15</button>
+                                <button type="button" class="date-btn" data-date="16">16</button>
+                                <button type="button" class="date-btn" data-date="17">17</button>
+                                <button type="button" class="date-btn" data-date="18">18</button>
+                                <button type="button" class="date-btn" data-date="19">19</button>
+                                <button type="button" class="date-btn" data-date="20">20</button>
+                                <button type="button" class="date-btn" data-date="21">21</button>
+                                <button type="button" class="date-btn" data-date="22">22</button>
+                                <button type="button" class="date-btn" data-date="23">23</button>
+                                <button type="button" class="date-btn" data-date="24">24</button>
+                                <button type="button" class="date-btn" data-date="25">25</button>
+                                <button type="button" class="date-btn" data-date="26">26</button>
+                                <button type="button" class="date-btn" data-date="27">27</button>
+                                <button type="button" class="date-btn" data-date="28">28</button>
+                                <button type="button" class="date-btn" data-date="29">29</button>
+                                <button type="button" class="date-btn" data-date="30">30</button>
+                                <button type="button" class="date-btn" data-date="31">31</button>
+                            </div>
                         </div>
                     </div>
                     <div class="form-row">

@@ -95,6 +95,16 @@ async function addAlert() {
         }
     }
     
+    // 日付指定の場合は選択された日付をチェック
+    let selectedDates = [];
+    if (repeatType === 'monthly-dates') {
+        selectedDates = getSelectedDates();
+        if (selectedDates.length === 0) {
+            showCuteAlert('日付を選択してください。', 'error');
+            return false;
+        }
+    }
+    
     const dateTime = new Date(`${date}T${time}`);
     
     if (dateTime <= new Date()) {
@@ -109,6 +119,7 @@ async function addAlert() {
         reminderMinutes: reminderMinutes > 0 ? reminderMinutes : null,
         repeatType: repeatType || 'none',
         weekdays: selectedWeekdays.length > 0 ? selectedWeekdays : null,
+        dates: selectedDates.length > 0 ? selectedDates : null,
         createdAt: new Date().toISOString()
     };
     
@@ -121,7 +132,7 @@ async function addAlert() {
         document.getElementById('alert-url').value = '';
         document.getElementById('reminder-minutes').value = '0';
         document.getElementById('repeat-type').value = 'none';
-        toggleWeekdayOptions();
+        toggleRepeatOptions();
         setDefaultDateTime();
         
         updateTimeline();
@@ -336,7 +347,7 @@ function updateTimeline() {
                     ${alert.url ? `<div class="alert-url"><span class="url-icon">🔗</span><a href="#" onclick="openLink('${alert.url}')" title="${alert.url}">${alert.url}</a></div>` : ''}
                     <div class="alert-details">
                         ${alert.reminderMinutes ? `<span class="alert-reminder">📢 ${alert.reminderMinutes}分前にお知らせ</span>` : ''}
-                        ${alert.repeatType && alert.repeatType !== 'none' ? `<span class="alert-repeat">🔄 ${getRepeatText(alert.repeatType, alert.weekdays)}</span>` : ''}
+                        ${alert.repeatType && alert.repeatType !== 'none' ? `<span class="alert-repeat">🔄 ${getRepeatText(alert.repeatType, alert.weekdays, alert.dates)}</span>` : ''}
                     </div>
                 </div>
             </div>
@@ -369,7 +380,7 @@ function formatDateTime(date) {
 }
 
 // 繰り返しタイプのテキストを取得
-function getRepeatText(repeatType, weekdays) {
+function getRepeatText(repeatType, weekdays, dates) {
     switch (repeatType) {
         case 'daily': return '毎日';
         case 'weekly': return '毎週';
@@ -379,6 +390,10 @@ function getRepeatText(repeatType, weekdays) {
             return weekdays.map(day => dayNames[day]).join('・');
         }
         case 'monthly': return '毎月';
+        case 'monthly-dates': {
+            if (!dates || dates.length === 0) return '毎月（日付指定）';
+            return '毎月 ' + dates.join('・') + '日';
+        }
         default: return '';
     }
 }
@@ -609,17 +624,32 @@ window.addAlert = async function() {
     return result;
 };
 
-// 曜日選択の表示/非表示を切り替え
-function toggleWeekdayOptions() {
+// 繰り返しオプションの表示/非表示を切り替え
+function toggleRepeatOptions() {
     const repeatType = document.getElementById('repeat-type').value;
     const weekdayOptions = document.getElementById('weekday-options');
+    const dateOptions = document.getElementById('date-options');
     
+    // 曜日選択の表示制御
     if (repeatType === 'weekdays') {
         weekdayOptions.style.display = 'block';
     } else {
         weekdayOptions.style.display = 'none';
         resetWeekdayOptions();
     }
+    
+    // 日付選択の表示制御
+    if (repeatType === 'monthly-dates') {
+        dateOptions.style.display = 'block';
+    } else {
+        dateOptions.style.display = 'none';
+        resetDateOptions();
+    }
+}
+
+// 曜日選択の表示/非表示を切り替え（後方互換性のため）
+function toggleWeekdayOptions() {
+    toggleRepeatOptions();
 }
 
 // 曜日選択をリセット
@@ -634,6 +664,20 @@ function resetWeekdayOptions() {
 function getSelectedWeekdays() {
     const weekdayBtns = document.querySelectorAll('#weekday-options .weekday-btn.active');
     return Array.from(weekdayBtns).map(btn => parseInt(btn.dataset.day));
+}
+
+// 日付選択をリセット
+function resetDateOptions() {
+    const dateBtns = document.querySelectorAll('#date-options .date-btn');
+    dateBtns.forEach(btn => {
+        btn.classList.remove('active');
+    });
+}
+
+// 選択された日付を取得
+function getSelectedDates() {
+    const dateBtns = document.querySelectorAll('#date-options .date-btn.active');
+    return Array.from(dateBtns).map(btn => parseInt(btn.dataset.date));
 }
 
 // アラートをスキップ
@@ -655,11 +699,19 @@ async function skipAlert(id) {
     }
 }
 
-// DOM読み込み後に曜日ボタンのイベントリスナーを設定
+// DOM読み込み後に曜日・日付ボタンのイベントリスナーを設定
 document.addEventListener('DOMContentLoaded', function() {
     // 曜日ボタンのクリックイベント
     const weekdayBtns = document.querySelectorAll('#weekday-options .weekday-btn');
     weekdayBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.classList.toggle('active');
+        });
+    });
+    
+    // 日付ボタンのクリックイベント
+    const dateBtns = document.querySelectorAll('#date-options .date-btn');
+    dateBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             btn.classList.toggle('active');
         });

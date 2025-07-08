@@ -757,6 +757,9 @@ function scheduleNextRepeat(alert) {
     case 'monthly':
       nextTime.setMonth(nextTime.getMonth() + 1);
       break;
+    case 'monthly-dates':
+      nextTime = getNextMonthlyDateTime(currentTime, alert.dates);
+      break;
     default:
       return;
   }
@@ -808,6 +811,54 @@ function getNextWeekdayTime(currentTime, weekdays) {
   
   // 見つからない場合は1週間後（フォールバック）
   return new Date(baseTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+}
+
+// 次の指定日付の時間を取得
+function getNextMonthlyDateTime(currentTime, dates) {
+  if (!dates || dates.length === 0) {
+    // 日付が指定されていない場合は次の月の同じ日
+    const nextMonth = new Date(currentTime);
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    return nextMonth;
+  }
+  
+  const now = new Date();
+  const baseTime = new Date(currentTime);
+  
+  // 今月の残りの日付をチェック
+  const currentMonth = baseTime.getMonth();
+  const currentYear = baseTime.getFullYear();
+  const currentDate = baseTime.getDate();
+  
+  // 今月の指定日付の中で、今日以降の最も早い日付を探す
+  const sortedDates = [...dates].sort((a, b) => a - b);
+  for (const date of sortedDates) {
+    if (date > currentDate) {
+      const nextDate = new Date(currentYear, currentMonth, date, 
+                               baseTime.getHours(), baseTime.getMinutes(), baseTime.getSeconds());
+      if (nextDate > now) {
+        return nextDate;
+      }
+    }
+  }
+  
+  // 今月に該当する日付がない場合は来月の最初の指定日付
+  const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+  const nextYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+  
+  // 来月の最初の指定日付
+  const firstDate = Math.min(...sortedDates);
+  const nextMonthDate = new Date(nextYear, nextMonth, firstDate, 
+                                baseTime.getHours(), baseTime.getMinutes(), baseTime.getSeconds());
+  
+  // 月末日を考慮して調整
+  const daysInMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+  if (firstDate > daysInMonth) {
+    // 指定日が存在しない場合は月末日に設定
+    nextMonthDate.setDate(daysInMonth);
+  }
+  
+  return nextMonthDate;
 }
 
 // アラートのタイマーをクリア
