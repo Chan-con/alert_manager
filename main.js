@@ -134,7 +134,6 @@ function toggleAutoStart() {
   app.setLoginItemSettings({
     openAtLogin: autoStartEnabled,
     openAsHidden: true,
-    path: process.execPath,
     args: ['--hidden']
   });
   
@@ -205,7 +204,6 @@ function loadSettings() {
     app.setLoginItemSettings({
       openAtLogin: autoStartEnabled,
       openAsHidden: true,
-      path: process.execPath,
       args: ['--hidden']
     });
   }
@@ -454,6 +452,13 @@ app.whenReady().then(() => {
   loadAlerts(); // アラートデータを先に読み込む
   startExpressServer(); // Expressサーバーを起動
   createWindow();
+  
+  // 自動起動時（--hiddenフラグがある場合）はウィンドウを非表示にする
+  if (process.argv.includes('--hidden')) {
+    if (mainWindow) {
+      mainWindow.hide();
+    }
+  }
 });
 
 // 全てのウィンドウが閉じられたときの処理
@@ -653,7 +658,6 @@ ipcMain.handle('save-settings', (event, settings) => {
       app.setLoginItemSettings({
         openAtLogin: autoStartEnabled,
         openAsHidden: true,
-        path: process.execPath,
         args: ['--hidden']
       });
       console.log('自動起動設定を更新しました:', autoStartEnabled);
