@@ -46,6 +46,7 @@ function createWindow() {
     resizable: true,
     minWidth: 350,
     minHeight: 600,
+    show: false, // 起動時はウィンドウを非表示
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -129,14 +130,16 @@ function updateTrayMenu() {
 
 // 自動起動の設定を管理する関数
 function toggleAutoStart() {
-  autoStartEnabled = !autoStartEnabled;
+  // セキュリティ強化: 自動起動を強制的に無効化
+  autoStartEnabled = false;
   
+  // 自動起動設定を更新
   app.setLoginItemSettings({
-    openAtLogin: autoStartEnabled,
-    openAsHidden: true,
-    path: process.execPath,
-    args: [app.getAppPath(), '--hidden']
+    openAtLogin: false,  // 強制的にfalseに設定
+    openAsHidden: true
   });
+  
+  console.log('自動起動設定を無効化しました:', autoStartEnabled);
   
   saveSettings();
   updateTrayMenu();
@@ -202,11 +205,15 @@ function loadSettings() {
   // 設定ファイルの値を優先し、必要に応じてシステム設定を同期
   if (autoStartEnabled !== systemAutoStart) {
     console.log('設定ファイルとシステム設定が異なるため、システム設定を更新します');
+    
+    // セキュリティ強化: 自動起動を強制的に無効化
+    autoStartEnabled = false;
+    console.log('セキュリティのため自動起動を強制的に無効化します');
+    
+    // 自動起動設定を更新
     app.setLoginItemSettings({
-      openAtLogin: autoStartEnabled,
-      openAsHidden: true,
-      path: process.execPath,
-      args: [app.getAppPath(), '--hidden']
+      openAtLogin: false,  // 強制的にfalseに設定
+      openAsHidden: true
     });
   }
   
@@ -392,37 +399,6 @@ function startExpressServer() {
           stdio: 'ignore' 
         });
         
-      } else {
-        // Linux用 - 複数のブラウザを試行
-        console.log('Linux用のブラウザ起動');
-        
-        const browsers = [
-          { cmd: 'google-chrome', args: chromeArgs },
-          { cmd: 'chromium-browser', args: chromeArgs },
-          { cmd: 'firefox', args: ['-new-window', url] },
-          { cmd: 'xdg-open', args: [url] }
-        ];
-        
-        let browserFound = false;
-        for (const browser of browsers) {
-          try {
-            console.log(`Trying ${browser.cmd}...`);
-            spawn(browser.cmd, browser.args, { 
-              detached: true, 
-              stdio: 'ignore' 
-            });
-            console.log(`Successfully launched ${browser.cmd}`);
-            browserFound = true;
-            break;
-          } catch (error) {
-            console.log(`Failed to launch ${browser.cmd}: ${error.message}`);
-            continue;
-          }
-        }
-        
-        if (!browserFound) {
-          console.log('No browser found');
-        }
       }
       
       console.log('新規ブラウザウィンドウを開きました');
@@ -450,17 +426,18 @@ function startExpressServer() {
 
 // アプリが準備完了したときの処理
 app.whenReady().then(() => {
+  // セキュリティ強化: 起動時に自動起動設定を強制的に無効化
+  app.setLoginItemSettings({
+    openAtLogin: false,
+    openAsHidden: true
+  });
+  console.log('起動時に自動起動設定を無効化しました');
+  
   loadSettings();
   loadAlerts(); // アラートデータを先に読み込む
   startExpressServer(); // Expressサーバーを起動
   createWindow();
   
-  // 自動起動時（--hiddenフラグがある場合）はウィンドウを非表示にする
-  if (process.argv.includes('--hidden')) {
-    if (mainWindow) {
-      mainWindow.hide();
-    }
-  }
 });
 
 // 全てのウィンドウが閉じられたときの処理
@@ -598,14 +575,6 @@ ipcMain.handle('open-link', async (event, url) => {
       });
       child.unref();
       
-    } else {
-      // Linux用
-      console.log('Linux用のブラウザ起動');
-      const child = spawn('google-chrome', chromeArgs, { 
-        detached: true, 
-        stdio: 'ignore' 
-      });
-      child.unref();
     }
     
     console.log('✅ 新規ブラウザウィンドウを開きました');
@@ -657,13 +626,17 @@ ipcMain.handle('save-settings', (event, settings) => {
     // 自動起動設定を更新
     if (settings.autoStartEnabled !== undefined) {
       autoStartEnabled = settings.autoStartEnabled;
+      
+      // セキュリティ強化: 自動起動を強制的に無効化
+      autoStartEnabled = false;
+      console.log('セキュリティのため自動起動を強制的に無効化します');
+      
+      // 自動起動設定を更新
       app.setLoginItemSettings({
-        openAtLogin: autoStartEnabled,
-        openAsHidden: true,
-        path: process.execPath,
-        args: [app.getAppPath(), '--hidden']
+        openAtLogin: false,  // 強制的にfalseに設定
+        openAsHidden: true
       });
-      console.log('自動起動設定を更新しました:', autoStartEnabled);
+      console.log('自動起動設定を無効化しました:', autoStartEnabled);
     }
     
     saveSettings();
@@ -881,14 +854,6 @@ function openNewBrowserWindow(url) {
       });
       child.unref();
       
-    } else {
-      // Linux用
-      console.log('自動通知: Linux用のブラウザ起動');
-      const child = spawn('google-chrome', chromeArgs, { 
-        detached: true, 
-        stdio: 'ignore' 
-      });
-      child.unref();
     }
     
     console.log('✅ 自動通知: 新規ブラウザウィンドウを開きました');
