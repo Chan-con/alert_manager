@@ -134,7 +134,8 @@ function toggleAutoStart() {
   app.setLoginItemSettings({
     openAtLogin: autoStartEnabled,
     openAsHidden: true,
-    args: ['--hidden']
+    path: process.execPath,
+    args: [app.getAppPath(), '--hidden']
   });
   
   saveSettings();
@@ -204,7 +205,8 @@ function loadSettings() {
     app.setLoginItemSettings({
       openAtLogin: autoStartEnabled,
       openAsHidden: true,
-      args: ['--hidden']
+      path: process.execPath,
+      args: [app.getAppPath(), '--hidden']
     });
   }
   
@@ -658,7 +660,8 @@ ipcMain.handle('save-settings', (event, settings) => {
       app.setLoginItemSettings({
         openAtLogin: autoStartEnabled,
         openAsHidden: true,
-        args: ['--hidden']
+        path: process.execPath,
+        args: [app.getAppPath(), '--hidden']
       });
       console.log('自動起動設定を更新しました:', autoStartEnabled);
     }
