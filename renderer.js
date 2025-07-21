@@ -359,18 +359,19 @@ function updateTimeline() {
 function formatDateTime(date) {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
     const alertDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    
+    // 曜日名の配列
+    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+    const dayOfWeek = dayNames[date.getDay()];
     
     let dateStr = '';
     if (alertDate.getTime() === today.getTime()) {
         dateStr = '今日';
-    } else if (alertDate.getTime() === tomorrow.getTime()) {
-        dateStr = '明日';
     } else {
         const month = date.getMonth() + 1;
         const day = date.getDate();
-        dateStr = `${month}/${day}`;
+        dateStr = `${month}/${day}(${dayOfWeek})`;
     }
     
     const hours = date.getHours().toString().padStart(2, '0');
