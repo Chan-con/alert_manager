@@ -893,11 +893,19 @@ function scheduleNotification(alert) {
     } else {
       const mainTimer = setTimeout(() => {
         // 通知を表示
-        new Notification({
+        const notification = new Notification({
           title: '通知',
           body: alert.content,
           icon: path.join(__dirname, 'assets', 'icon.png')
-        }).show();
+        });
+        notification.show();
+        // 通知クリックでアプリ表示
+        notification.on('click', () => {
+          if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        });
         // 通知直後にタイムラインリフレッシュ
         if (mainWindow) {
           mainWindow.webContents.send('alert-updated');
@@ -940,11 +948,19 @@ function scheduleNotification(alert) {
         console.warn(`リマインダータイマーが上限を超えたため登録しません: id=${alert.id}, reminderDelay=${reminderDelay}`);
       } else {
         const reminderTimer = setTimeout(() => {
-          new Notification({
+          const reminderNotification = new Notification({
             title: `${alert.reminderMinutes}分前のお知らせ`,
             body: alert.content,
             icon: path.join(__dirname, 'assets', 'icon.png')
-          }).show();
+          });
+          reminderNotification.show();
+          // 通知クリックでアプリ表示
+          reminderNotification.on('click', () => {
+            if (mainWindow) {
+              mainWindow.show();
+              mainWindow.focus();
+            }
+          });
           // n分前通知直後にタイムラインリフレッシュ
           if (mainWindow) {
             mainWindow.webContents.send('alert-updated');
