@@ -1,3 +1,11 @@
+// --- clearAlertTimers: グローバルスコープに配置 ---
+function clearAlertTimers(alertId) {
+  if (alertTimers.has(alertId)) {
+    const timers = alertTimers.get(alertId);
+    timers.forEach(timer => clearTimeout(timer));
+    alertTimers.delete(alertId);
+  }
+}
 const { app, BrowserWindow, ipcMain, shell, Notification, Tray, Menu, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -20,8 +28,6 @@ let globalSettings = {
 let currentGlobalShortcut = null;
 let isSettingsWindowOpen = false;
 let isCapturingHotkey = false;
-
-// 二重起動を防止
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -34,10 +40,12 @@ if (!gotTheLock) {
       mainWindow.focus();
     }
   });
+
 }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
+
     width: 400,
     height: 750,
     frame: false, // ヘッダーレス
@@ -54,6 +62,9 @@ function createWindow() {
     }
   });
 
+// --- ここにclearAlertTimers関数を移動 ---
+
+// ここから下はcreateWindow関数の続き
   mainWindow.loadFile('index.html');
   
   // 開発時のみDevToolsを開く
@@ -398,7 +409,7 @@ function startExpressServer() {
           detached: true, 
           stdio: 'ignore' 
         });
-        
+
       }
       
       console.log('新規ブラウザウィンドウを開きました');
@@ -875,43 +886,48 @@ function scheduleNotification(alert) {
   
   if (alertTime > now) {
     const delay = alertTime.getTime() - now.getTime();
-    const mainTimer = setTimeout(() => {
-      // 通知を表示
-      new Notification({
-        title: '通知',
-        body: alert.content,
-        icon: path.join(__dirname, 'assets', 'icon.png')
-      }).show();
-      
-      // n分前通知の設定がない場合は、本番通知時にURLを開く
-      if (alert.url && (!alert.reminderMinutes || alert.reminderMinutes === 0)) {
-        openNewBrowserWindow(alert.url);
-      }
-      
-      // 繰り返し設定がある場合は次の通知をスケジュール
-      if (alert.repeatType && alert.repeatType !== 'none') {
-        scheduleNextRepeat(alert);
-      }
-      
-      // 繰り返しなしの場合は終了後に自動削除
-      if (!alert.repeatType || alert.repeatType === 'none') {
-        const deleteTimer = setTimeout(() => {
-          deleteExpiredAlert(alert.id);
-        }, 5000); // 5秒後に削除
-        
-        // 削除タイマーも保存
-        if (!alertTimers.has(alert.id)) {
-          alertTimers.set(alert.id, []);
+    // setTimeoutの最大値（32bit上限）: 2,147,483,647ms（約24.8日）
+    const MAX_TIMEOUT = 2147483647;
+    if (delay > MAX_TIMEOUT) {
+      console.warn(`通知タイマーが上限を超えたため登録しません: id=${alert.id}, delay=${delay}`);
+    } else {
+      const mainTimer = setTimeout(() => {
+        // 通知を表示
+        new Notification({
+          title: '通知',
+          body: alert.content,
+          icon: path.join(__dirname, 'assets', 'icon.png')
+        }).show();
+        // 通知直後にタイムラインリフレッシュ
+        if (mainWindow) {
+          mainWindow.webContents.send('alert-updated');
         }
-        alertTimers.get(alert.id).push(deleteTimer);
+        // n分前通知の設定がない場合は、本番通知時にURLを開く
+        if (alert.url && (!alert.reminderMinutes || alert.reminderMinutes === 0)) {
+          openNewBrowserWindow(alert.url);
+        }
+        // 繰り返し設定がある場合は次の通知をスケジュール
+        if (alert.repeatType && alert.repeatType !== 'none') {
+          scheduleNextRepeat(alert);
+        }
+        // 繰り返しなしの場合は終了後に自動削除
+        if (!alert.repeatType || alert.repeatType === 'none') {
+          const deleteTimer = setTimeout(() => {
+            deleteExpiredAlert(alert.id);
+          }, 5000); // 5秒後に削除
+          // 削除タイマーも保存
+          if (!alertTimers.has(alert.id)) {
+            alertTimers.set(alert.id, []);
+          }
+          alertTimers.get(alert.id).push(deleteTimer);
+        }
+      }, delay);
+      // メインタイマーを保存
+      if (!alertTimers.has(alert.id)) {
+        alertTimers.set(alert.id, []);
       }
-    }, delay);
-    
-    // メインタイマーを保存
-    if (!alertTimers.has(alert.id)) {
-      alertTimers.set(alert.id, []);
+      alertTimers.get(alert.id).push(mainTimer);
     }
-    alertTimers.get(alert.id).push(mainTimer);
   }
   
   // n分前の通知
@@ -919,18 +935,25 @@ function scheduleNotification(alert) {
     const reminderTime = new Date(alertTime.getTime() - (alert.reminderMinutes * 60000));
     if (reminderTime > now) {
       const reminderDelay = reminderTime.getTime() - now.getTime();
-      const reminderTimer = setTimeout(() => {
-        new Notification({
-          title: `${alert.reminderMinutes}分前のお知らせ`,
-          body: alert.content,
-          icon: path.join(__dirname, 'assets', 'icon.png')
-        }).show();
-        
-        // n分前通知が設定されている場合は、この時にURLを開く
-        if (alert.url) {
-          openNewBrowserWindow(alert.url);
-        }
-      }, reminderDelay);
+      const MAX_TIMEOUT = 2147483647;
+      if (reminderDelay > MAX_TIMEOUT) {
+        console.warn(`リマインダータイマーが上限を超えたため登録しません: id=${alert.id}, reminderDelay=${reminderDelay}`);
+      } else {
+        const reminderTimer = setTimeout(() => {
+          new Notification({
+            title: `${alert.reminderMinutes}分前のお知らせ`,
+            body: alert.content,
+            icon: path.join(__dirname, 'assets', 'icon.png')
+          }).show();
+          // n分前通知直後にタイムラインリフレッシュ
+          if (mainWindow) {
+            mainWindow.webContents.send('alert-updated');
+          }
+          // n分前通知が設定されている場合は、この時にURLを開く
+          if (alert.url) {
+            openNewBrowserWindow(alert.url);
+          }
+        }, reminderDelay);
       
       // リマインダータイマーも保存
       if (!alertTimers.has(alert.id)) {
@@ -943,49 +966,8 @@ function scheduleNotification(alert) {
 
 // 繰り返し通知の次回スケジュール
 function scheduleNextRepeat(alert) {
-  const currentTime = new Date(alert.dateTime);
-  let nextTime = new Date(currentTime);
-  
-  switch (alert.repeatType) {
-    case 'daily':
-      nextTime.setDate(nextTime.getDate() + 1);
-      break;
-    case 'weekly':
-      nextTime.setDate(nextTime.getDate() + 7);
-      break;
-    case 'weekdays':
-      nextTime = getNextWeekdayTime(currentTime, alert.weekdays);
-      break;
-    case 'monthly':
-      nextTime.setMonth(nextTime.getMonth() + 1);
-      break;
-    case 'monthly-dates':
-      nextTime = getNextMonthlyDateTime(currentTime, alert.dates);
-      break;
-    default:
-      return;
-  }
-  
-  // 新しい時間で通知を更新
-  const updatedAlert = {
-    ...alert,
-    dateTime: nextTime.toISOString()
-  };
-  
-  const index = alerts.findIndex(a => a.id === alert.id);
-  if (index !== -1) {
-    // 削除されたアラートが再スケジュールされないように確認
-    const existingAlert = alerts[index];
-    if (existingAlert && existingAlert.id === alert.id) {
-      alerts[index] = updatedAlert;
-      saveAlerts();
-      scheduleNotification(updatedAlert);
-      // レンダラープロセスに更新を通知
-      if (mainWindow) {
-        mainWindow.webContents.send('alert-updated', updatedAlert);
-      }
-    }
-  }
+  // scheduleNextRepeatは不要になったため、空実装に変更
+  return;
 }
 
 // 次の指定曜日の時間を取得
@@ -1081,5 +1063,8 @@ function deleteExpiredAlert(id) {
   if (mainWindow) {
     mainWindow.webContents.send('alert-deleted', id);
   }
+}
+
+// ファイル全体の閉じ括弧（不足分）
 }
 

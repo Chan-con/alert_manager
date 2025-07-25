@@ -1,148 +1,109 @@
 const { ipcRenderer } = require('electron');
+// 通知更新イベントでタイムラインを即時リフレッシュ
+ipcRenderer.on('alert-updated', async () => {
+    try {
+        await loadAlerts();
+        updateTimeline();
+    } catch (e) {
+        console.error('タイムラインリフレッシュ失敗:', e);
+    }
+});
 
 let alerts = [];
 
-// 初期化
-document.addEventListener('DOMContentLoaded', async () => {
-    await loadAlerts();
-    setDefaultDateTime();
-    updateTimeline();
-    
-    // 1分ごとにタイムラインを更新
-    setInterval(updateTimeline, 60000);
-    
-    // メインプロセスからの削除通知を受信
-    ipcRenderer.on('alert-deleted', (event, id) => {
-        alerts = alerts.filter(alert => alert.id !== id);
-        updateTimeline();
-    });
-    
-    // メインプロセスからの更新通知を受信（繰り返し通知用）
-    ipcRenderer.on('alert-updated', (event, updatedAlert) => {
-        const index = alerts.findIndex(alert => alert.id === updatedAlert.id);
-        if (index !== -1) {
-            alerts[index] = updatedAlert;
-            updateTimeline();
-        }
-    });
-    
-    // URL入力フィールドの変更を監視
-    const urlInput = document.getElementById('alert-url');
-    const addBtn = document.querySelector('.add-btn-compact');
-    
-    urlInput.addEventListener('input', () => {
-        validateFormInputs();
-        updateUrlInputStyle();
-    });
-    
-    // 他の必須フィールドも監視
-    document.getElementById('alert-content').addEventListener('input', validateFormInputs);
-    document.getElementById('alert-date').addEventListener('change', validateFormInputs);
-    document.getElementById('alert-time').addEventListener('change', validateFormInputs);
-    
-    // 初期バリデーション
-    validateFormInputs();
-});
-
-// デフォルトの日時を設定
-function setDefaultDateTime() {
-    const now = new Date();
-    // 現在の日付を取得（ローカルタイムゾーン）
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const date = `${year}-${month}-${day}`;
-    
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const time = `${hours}:${minutes}`;
-    
-    document.getElementById('alert-date').value = date;
-    document.getElementById('alert-time').value = time;
-}
-
-// アラートを読み込み
+// アラート一覧をメインプロセスから取得
 async function loadAlerts() {
     try {
-        alerts = await ipcRenderer.invoke('get-alerts');
-        console.log('アラートを読み込みました:', alerts.length);
+        const result = await ipcRenderer.invoke('get-alerts');
+        if (Array.isArray(result)) {
+            alerts = result;
+        } else {
+            alerts = [];
+            console.error('get-alertsの結果が配列ではありません:', result);
+            showCuteAlert('通知データの取得に失敗しました。', 'error');
+        }
     } catch (error) {
-        console.error('アラートの読み込みエラー:', error);
+        alerts = [];
+        console.error('get-alertsの取得エラー:', error);
+        showCuteAlert('通知データの取得に失敗しました。', 'error');
     }
 }
-
-// 新しいアラートを追加
-async function addAlert() {
-    const content = document.getElementById('alert-content').value.trim();
-    const date = document.getElementById('alert-date').value;
-    const time = document.getElementById('alert-time').value;
-    const url = document.getElementById('alert-url').value.trim();
-    const reminderMinutes = parseInt(document.getElementById('reminder-minutes').value);
-    const repeatType = document.getElementById('repeat-type').value;
-    
-    if (!content || !date || !time) {
-        showCuteAlert('通知内容、日付、時間を入力してください。', 'error');
-        return false;
-    }
-    
-    // 曜日指定の場合は選択された曜日をチェック
-    let selectedWeekdays = [];
-    if (repeatType === 'weekdays') {
-        selectedWeekdays = getSelectedWeekdays();
-        if (selectedWeekdays.length === 0) {
-            showCuteAlert('曜日を選択してください。', 'error');
-            return false;
+// 繰り返しアラートの次回発生日時を計算
+function getNextOccurrence(alert, now) {
+    const base = new Date(alert.dateTime);
+    let next = null;
+    switch (alert.repeatType) {
+        case 'daily': {
+            next = new Date(base);
+            let maxLoop = 4000; // 約10年分
+            while (next <= now && maxLoop-- > 0) {
+                next.setDate(next.getDate() + 1);
+            }
+            if (maxLoop <= 0) return null;
+            // 1年より未来は異常とみなす
+            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
+            return next > now ? next : null;
         }
-    }
-    
-    // 日付指定の場合は選択された日付をチェック
-    let selectedDates = [];
-    if (repeatType === 'monthly-dates') {
-        selectedDates = getSelectedDates();
-        if (selectedDates.length === 0) {
-            showCuteAlert('日付を選択してください。', 'error');
-            return false;
+        case 'weekly': {
+            next = new Date(base);
+            let maxLoop = 1000; // 約20年分
+            while (next <= now && maxLoop-- > 0) {
+                next.setDate(next.getDate() + 7);
+            }
+            if (maxLoop <= 0) return null;
+            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
+            return next > now ? next : null;
         }
-    }
-    
-    const dateTime = new Date(`${date}T${time}`);
-    
-    if (dateTime <= new Date()) {
-        showCuteAlert('未来の日時を選択してください。', 'error');
-        return false;
-    }
-    
-    const newAlert = {
-        content: content,
-        dateTime: dateTime.toISOString(),
-        url: url || null,
-        reminderMinutes: reminderMinutes > 0 ? reminderMinutes : null,
-        repeatType: repeatType || 'none',
-        weekdays: selectedWeekdays.length > 0 ? selectedWeekdays : null,
-        dates: selectedDates.length > 0 ? selectedDates : null,
-        createdAt: new Date().toISOString()
-    };
-    
-    try {
-        const savedAlert = await ipcRenderer.invoke('add-alert', newAlert);
-        alerts.push(savedAlert);
-        
-        // フォームをリセット
-        document.getElementById('alert-content').value = '';
-        document.getElementById('alert-url').value = '';
-        document.getElementById('reminder-minutes').value = '0';
-        document.getElementById('repeat-type').value = 'none';
-        toggleRepeatOptions();
-        setDefaultDateTime();
-        
-        updateTimeline();
-        
-        console.log('アラートを追加しました:', savedAlert);
-        return true;
-    } catch (error) {
-        console.error('アラート追加エラー:', error);
-        showCuteAlert('アラートの追加に失敗しました。', 'error');
-        return false;
+        case 'weekdays': {
+            // 指定曜日の次回
+            const weekdays = alert.weekdays || [];
+            if (weekdays.length === 0) return null;
+            let candidate = new Date(now);
+            candidate.setHours(base.getHours(), base.getMinutes(), 0, 0);
+            for (let i = 0; i < 14; i++) { // 2週間分
+                if (weekdays.includes(candidate.getDay()) && candidate > now) {
+                    // 1年より未来は異常とみなす
+                    if (candidate - now > 365 * 24 * 60 * 60 * 1000) return null;
+                    return candidate;
+                }
+                candidate.setDate(candidate.getDate() + 1);
+            }
+            return null;
+        }
+        case 'monthly': {
+            // 毎月同じ日付
+            next = new Date(base);
+            let maxLoop = 240; // 20年分
+            while (next <= now && maxLoop-- > 0) {
+                next.setMonth(next.getMonth() + 1);
+            }
+            if (maxLoop <= 0) return null;
+            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
+            return next > now ? next : null;
+        }
+        case 'monthly-dates': {
+            // 毎月指定日
+            const dates = alert.dates || [];
+            if (dates.length === 0) return null;
+            let candidate = new Date(now);
+            candidate.setHours(base.getHours(), base.getMinutes(), 0, 0);
+            // 今月・来月の候補を探す
+            let found = null;
+            for (let m = 0; m < 2; m++) {
+                for (let d of dates) {
+                    let test = new Date(candidate.getFullYear(), candidate.getMonth() + m, d, base.getHours(), base.getMinutes(), 0, 0);
+                    // 日付が不正（例：2月30日→3月2日など）を除外
+                    if (test.getDate() !== d) continue;
+                    if (test > now) {
+                        if (!found || test < found) found = test;
+                    }
+                }
+            }
+            if (found && (found - now > 365 * 24 * 60 * 60 * 1000)) return null;
+            return found;
+        }
+        default:
+            return null;
     }
 }
 
@@ -238,6 +199,42 @@ function showEditForm(alert) {
     `;
     
     document.body.appendChild(editModal);
+    // 編集フォーム生成時に繰り返しオプションの表示状態を初期化
+    setTimeout(() => {
+        // 編集フォーム用の繰り返しオプション表示制御
+        const repeatTypeSelect = document.getElementById('edit-repeat');
+        const dateOptions = document.getElementById('edit-date-options');
+        if (repeatTypeSelect) {
+            // 初期表示
+            if (repeatTypeSelect.value === 'monthly-dates') {
+                dateOptions.style.display = 'block';
+            } else {
+                dateOptions.style.display = 'none';
+            }
+            // 変更時
+            repeatTypeSelect.addEventListener('change', () => {
+                if (repeatTypeSelect.value === 'monthly-dates') {
+                    dateOptions.style.display = 'block';
+                } else {
+                    dateOptions.style.display = 'none';
+                }
+            });
+        }
+        // 日付ボタンの選択状態を復元
+        if (alert.dates && Array.isArray(alert.dates)) {
+            alert.dates.forEach(d => {
+                const btn = dateOptions.querySelector(`.date-btn[data-date='${d}']`);
+                if (btn) btn.classList.add('active');
+            });
+        }
+        // 日付ボタンのクリックイベント
+        const dateBtns = dateOptions.querySelectorAll('.date-btn');
+        dateBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                btn.classList.toggle('active');
+            });
+        });
+    }, 0);
 }
 
 // 編集を保存
@@ -246,6 +243,9 @@ async function saveEdit(id) {
     const date = document.getElementById('edit-date').value;
     const time = document.getElementById('edit-time').value;
     const url = document.getElementById('edit-url').value.trim();
+    // 変数宣言は1回のみ
+    var weekdays = [];
+    var dates = [];
     const reminderMinutes = parseInt(document.getElementById('edit-reminder').value);
     const repeatType = document.getElementById('edit-repeat').value;
     
@@ -261,12 +261,20 @@ async function saveEdit(id) {
         return;
     }
     
+    if (repeatType === 'weekdays') {
+        weekdays = getSelectedWeekdays();
+    }
+    if (repeatType === 'monthly-dates') {
+        dates = getSelectedDates();
+    }
     const updatedAlert = {
         content: content,
         dateTime: dateTime.toISOString(),
         url: url || null,
         reminderMinutes: reminderMinutes > 0 ? reminderMinutes : null,
-        repeatType: repeatType || 'none'
+        repeatType: repeatType || 'none',
+        weekdays: weekdays,
+        dates: dates
     };
     
     try {
@@ -302,36 +310,52 @@ function updateTimeline() {
         timeline.innerHTML = '<div class="empty-timeline">まだ通知がありません<br>新しい通知を追加してみましょう！</div>';
         return;
     }
-    
+
     const now = new Date();
-    
-    // 有効なアラートのみを表示（期限切れは繰り返しアラートのみ残す）
-    const activeAlerts = alerts.filter(alert => {
-        const alertTime = new Date(alert.dateTime);
-        // 未来のアラートまたは繰り返しアラートのみ表示
-        return alertTime > now || (alert.repeatType && alert.repeatType !== 'none');
-    });
-    
-    if (activeAlerts.length === 0) {
-        timeline.innerHTML = '<div class="empty-timeline">有効な通知がありません<br>新しい通知を追加してみましょう！</div>';
+    const allAlerts = alerts.map(alert => {
+        let alertTime;
+        if (!alert.repeatType || alert.repeatType === 'none') {
+            alertTime = new Date(alert.dateTime);
+            // 単発アラートは過去分も履歴として残す
+            return { ...alert, nextTime: alertTime };
+        } else {
+            // 繰り返しアラートは次回分のみ表示（過去分は除外）
+            alertTime = getNextOccurrence(alert, now);
+            if (!(alertTime instanceof Date) || isNaN(alertTime.getTime())) return null;
+            return { ...alert, nextTime: alertTime };
+        }
+    }).filter(a => a && a.nextTime && a.nextTime instanceof Date && !isNaN(a.nextTime.getTime()));
+
+    if (allAlerts.length === 0) {
+        timeline.innerHTML = '<div class="empty-timeline">通知データがありません<br>新しい通知を追加してみましょう！</div>';
         return;
     }
-    
+
     // 日時順にソート（早い順）
-    const sortedAlerts = [...activeAlerts].sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
-    
-    timeline.innerHTML = sortedAlerts.map(alert => {
-        const alertTime = new Date(alert.dateTime);
+    const sortedAlerts = [...allAlerts].sort((a, b) => a.nextTime - b.nextTime);
+
+    // future/past判定
+    const futureCount = sortedAlerts.filter(a => a.nextTime >= now).length;
+    const pastCount = sortedAlerts.length - futureCount;
+
+    let headerHtml = '';
+    if (futureCount === 0 && pastCount > 0) {
+        headerHtml = '<div class="empty-timeline">過去の通知のみです（履歴表示）<br>新しい通知を追加してみましょう！</div>';
+    }
+
+    timeline.innerHTML = headerHtml + sortedAlerts.map(alert => {
+        const alertTime = alert.nextTime;
+        if (!(alertTime instanceof Date) || isNaN(alertTime.getTime())) return '';
         const isPast = alertTime < now;
-        const isSoon = !isPast && (alertTime.getTime() - now.getTime()) < 60 * 60 * 1000; // 1時間以内
-        
+        const isSoon = !isPast && (alertTime.getTime() - now.getTime()) < 60 * 60 * 1000;
+
         const timeString = formatDateTime(alertTime);
         const contentWithLinks = processLinks(alert.content);
-        
+
         let statusClass = '';
         if (isPast) statusClass = 'past';
         else if (isSoon) statusClass = 'soon';
-        
+
         return `
             <div class="timeline-item ${statusClass}">
                 <div class="alert-card">
@@ -353,6 +377,84 @@ function updateTimeline() {
             </div>
         `;
     }).join('');
+// 繰り返しアラートの次回発生日時を計算
+function getNextOccurrence(alert, now) {
+    const base = new Date(alert.dateTime);
+    let next = null;
+    switch (alert.repeatType) {
+        case 'daily': {
+            next = new Date(base);
+            let maxLoop = 4000; // 約10年分
+            while (next <= now && maxLoop-- > 0) {
+                next.setDate(next.getDate() + 1);
+            }
+            if (maxLoop <= 0) return null;
+            // 1年より未来は異常とみなす
+            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
+            return next > now ? next : null;
+        }
+        case 'weekly': {
+            next = new Date(base);
+            let maxLoop = 1000; // 約20年分
+            while (next <= now && maxLoop-- > 0) {
+                next.setDate(next.getDate() + 7);
+            }
+            if (maxLoop <= 0) return null;
+            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
+            return next > now ? next : null;
+        }
+        case 'weekdays': {
+            // 指定曜日の次回
+            const weekdays = alert.weekdays || [];
+            if (weekdays.length === 0) return null;
+            let candidate = new Date(now);
+            candidate.setHours(base.getHours(), base.getMinutes(), 0, 0);
+            for (let i = 0; i < 14; i++) { // 2週間分
+                if (weekdays.includes(candidate.getDay()) && candidate > now) {
+                    // 1年より未来は異常とみなす
+                    if (candidate - now > 365 * 24 * 60 * 60 * 1000) return null;
+                    return candidate;
+                }
+                candidate.setDate(candidate.getDate() + 1);
+            }
+            return null;
+        }
+        case 'monthly': {
+            // 毎月同じ日付
+            next = new Date(base);
+            let maxLoop = 240; // 20年分
+            while (next <= now && maxLoop-- > 0) {
+                next.setMonth(next.getMonth() + 1);
+            }
+            if (maxLoop <= 0) return null;
+            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
+            return next > now ? next : null;
+        }
+        case 'monthly-dates': {
+            // 毎月指定日
+            const dates = alert.dates || [];
+            if (dates.length === 0) return null;
+            let candidate = new Date(now);
+            candidate.setHours(base.getHours(), base.getMinutes(), 0, 0);
+            // 今月・来月の候補を探す
+            let found = null;
+            for (let m = 0; m < 2; m++) {
+                for (let d of dates) {
+                    let test = new Date(candidate.getFullYear(), candidate.getMonth() + m, d, base.getHours(), base.getMinutes(), 0, 0);
+                    // 日付が不正（例：2月30日→3月2日など）を除外
+                    if (test.getDate() !== d) continue;
+                    if (test > now) {
+                        if (!found || test < found) found = test;
+                    }
+                }
+            }
+            if (found && (found - now > 365 * 24 * 60 * 60 * 1000)) return null;
+            return found;
+        }
+        default:
+            return null;
+    }
+}
 }
 
 // 日時をフォーマット
@@ -449,6 +551,56 @@ document.addEventListener('keydown', (e) => {
 });
 
 // フォームトグル機能
+// 新しい通知を追加
+async function addAlert() {
+    const content = document.getElementById('alert-content').value.trim();
+    const date = document.getElementById('alert-date').value;
+    const time = document.getElementById('alert-time').value;
+    const url = document.getElementById('alert-url').value.trim();
+    const reminderMinutes = parseInt(document.getElementById('reminder-minutes')?.value || '0');
+    const repeatType = document.getElementById('repeat-type')?.value || 'none';
+    // 変数宣言は1回のみ
+    var weekdays = [];
+    var dates = [];
+    if (repeatType === 'weekdays') {
+        weekdays = getSelectedWeekdays();
+    }
+    if (repeatType === 'monthly-dates') {
+        dates = getSelectedDates();
+    }
+    if (!content || !date || !time) {
+        showCuteAlert('通知内容、日付、時間を入力してください。', 'error');
+        return false;
+    }
+    const dateTime = new Date(`${date}T${time}`);
+    if (dateTime <= new Date()) {
+        showCuteAlert('未来の日時を選択してください。', 'error');
+        return false;
+    }
+    const newAlert = {
+        content: content,
+        dateTime: dateTime.toISOString(),
+        url: url || null,
+        reminderMinutes: reminderMinutes > 0 ? reminderMinutes : null,
+        repeatType: repeatType,
+        weekdays: weekdays,
+        dates: dates
+    };
+    try {
+        const savedAlert = await ipcRenderer.invoke('add-alert', newAlert);
+        if (savedAlert) {
+            await loadAlerts();
+            updateTimeline();
+            showCuteAlert('通知を追加しました！', 'info');
+            if (formExpanded) toggleForm();
+            return true;
+        }
+    } catch (error) {
+        console.error('通知追加エラー:', error);
+        showCuteAlert('通知の追加に失敗しました。', 'error');
+        return false;
+    }
+}
 let formExpanded = false;
 
 function toggleForm() {
@@ -618,17 +770,6 @@ function showCuteAlert(message, type = 'info') {
     };
 }
 
-// 既存のaddAlert関数を保存
-const originalAddAlert = addAlert;
-
-// addAlert関数を再定義してフォームトグル機能を追加
-window.addAlert = async function() {
-    const result = await originalAddAlert();
-    if (result !== false && formExpanded) {
-        toggleForm();
-    }
-    return result;
-};
 
 // 繰り返しオプションの表示/非表示を切り替え
 function toggleRepeatOptions() {
@@ -714,7 +855,7 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.classList.toggle('active');
         });
     });
-    
+
     // 日付ボタンのクリックイベント
     const dateBtns = document.querySelectorAll('#date-options .date-btn');
     dateBtns.forEach(btn => {
@@ -722,10 +863,13 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.classList.toggle('active');
         });
     });
-    
+
     // 設定を読み込み
     loadSettingsFromStorage();
-    
+
+    // タイムライン初期表示
+    loadAlerts().then(updateTimeline);
+
     // ホットキー入力のクリックイベントを設定
     const hotkeyInput = document.getElementById('timeline-hotkey');
     hotkeyInput.addEventListener('click', captureHotkey);
