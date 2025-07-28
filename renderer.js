@@ -186,10 +186,65 @@ function showEditForm(alert) {
                             <option value="none" ${alert.repeatType === 'none' ? 'selected' : ''}>なし</option>
                             <option value="daily" ${alert.repeatType === 'daily' ? 'selected' : ''}>毎日</option>
                             <option value="weekly" ${alert.repeatType === 'weekly' ? 'selected' : ''}>毎週</option>
+                            <option value="weekdays" ${alert.repeatType === 'weekdays' ? 'selected' : ''}>曜日指定</option>
                             <option value="monthly" ${alert.repeatType === 'monthly' ? 'selected' : ''}>毎月</option>
+                            <option value="monthly-dates" ${alert.repeatType === 'monthly-dates' ? 'selected' : ''}>毎月（日付指定）</option>
                         </select>
                     </div>
                 </div>
+                
+                <!-- 曜日選択オプション（編集用） -->
+                <div class="form-row weekday-options" id="edit-weekday-options" style="display: none;">
+                    <div class="weekday-selector">
+                        <button type="button" class="weekday-btn" data-day="0">日</button>
+                        <button type="button" class="weekday-btn" data-day="1">月</button>
+                        <button type="button" class="weekday-btn" data-day="2">火</button>
+                        <button type="button" class="weekday-btn" data-day="3">水</button>
+                        <button type="button" class="weekday-btn" data-day="4">木</button>
+                        <button type="button" class="weekday-btn" data-day="5">金</button>
+                        <button type="button" class="weekday-btn" data-day="6">土</button>
+                    </div>
+                </div>
+                
+                <!-- 日付選択オプション（編集用） -->
+                <div class="form-row date-options" id="edit-date-options" style="display: none;">
+                    <div class="date-selector">
+                        <div class="calendar-grid">
+                            <button type="button" class="date-btn" data-date="1">1</button>
+                            <button type="button" class="date-btn" data-date="2">2</button>
+                            <button type="button" class="date-btn" data-date="3">3</button>
+                            <button type="button" class="date-btn" data-date="4">4</button>
+                            <button type="button" class="date-btn" data-date="5">5</button>
+                            <button type="button" class="date-btn" data-date="6">6</button>
+                            <button type="button" class="date-btn" data-date="7">7</button>
+                            <button type="button" class="date-btn" data-date="8">8</button>
+                            <button type="button" class="date-btn" data-date="9">9</button>
+                            <button type="button" class="date-btn" data-date="10">10</button>
+                            <button type="button" class="date-btn" data-date="11">11</button>
+                            <button type="button" class="date-btn" data-date="12">12</button>
+                            <button type="button" class="date-btn" data-date="13">13</button>
+                            <button type="button" class="date-btn" data-date="14">14</button>
+                            <button type="button" class="date-btn" data-date="15">15</button>
+                            <button type="button" class="date-btn" data-date="16">16</button>
+                            <button type="button" class="date-btn" data-date="17">17</button>
+                            <button type="button" class="date-btn" data-date="18">18</button>
+                            <button type="button" class="date-btn" data-date="19">19</button>
+                            <button type="button" class="date-btn" data-date="20">20</button>
+                            <button type="button" class="date-btn" data-date="21">21</button>
+                            <button type="button" class="date-btn" data-date="22">22</button>
+                            <button type="button" class="date-btn" data-date="23">23</button>
+                            <button type="button" class="date-btn" data-date="24">24</button>
+                            <button type="button" class="date-btn" data-date="25">25</button>
+                            <button type="button" class="date-btn" data-date="26">26</button>
+                            <button type="button" class="date-btn" data-date="27">27</button>
+                            <button type="button" class="date-btn" data-date="28">28</button>
+                            <button type="button" class="date-btn" data-date="29">29</button>
+                            <button type="button" class="date-btn" data-date="30">30</button>
+                            <button type="button" class="date-btn" data-date="31">31</button>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="edit-buttons">
                     <button onclick="saveEdit('${alert.id}')" class="save-btn">保存</button>
                     <button onclick="closeEditModal()" class="cancel-btn">キャンセル</button>
@@ -203,23 +258,42 @@ function showEditForm(alert) {
     setTimeout(() => {
         // 編集フォーム用の繰り返しオプション表示制御
         const repeatTypeSelect = document.getElementById('edit-repeat');
+        const weekdayOptions = document.getElementById('edit-weekday-options');
         const dateOptions = document.getElementById('edit-date-options');
-        if (repeatTypeSelect) {
-            // 初期表示
-            if (repeatTypeSelect.value === 'monthly-dates') {
+        
+        // 繰り返しオプションの初期表示設定
+        function updateEditRepeatOptions() {
+            const repeatType = repeatTypeSelect.value;
+            
+            // 曜日選択の表示制御
+            if (repeatType === 'weekdays') {
+                weekdayOptions.style.display = 'block';
+            } else {
+                weekdayOptions.style.display = 'none';
+            }
+            
+            // 日付選択の表示制御
+            if (repeatType === 'monthly-dates') {
                 dateOptions.style.display = 'block';
             } else {
                 dateOptions.style.display = 'none';
             }
-            // 変更時
-            repeatTypeSelect.addEventListener('change', () => {
-                if (repeatTypeSelect.value === 'monthly-dates') {
-                    dateOptions.style.display = 'block';
-                } else {
-                    dateOptions.style.display = 'none';
-                }
+        }
+        
+        // 初期表示
+        updateEditRepeatOptions();
+        
+        // 変更時の処理
+        repeatTypeSelect.addEventListener('change', updateEditRepeatOptions);
+        
+        // 曜日ボタンの選択状態を復元
+        if (alert.weekdays && Array.isArray(alert.weekdays)) {
+            alert.weekdays.forEach(day => {
+                const btn = weekdayOptions.querySelector(`.weekday-btn[data-day='${day}']`);
+                if (btn) btn.classList.add('active');
             });
         }
+        
         // 日付ボタンの選択状態を復元
         if (alert.dates && Array.isArray(alert.dates)) {
             alert.dates.forEach(d => {
@@ -227,6 +301,15 @@ function showEditForm(alert) {
                 if (btn) btn.classList.add('active');
             });
         }
+        
+        // 曜日ボタンのクリックイベント
+        const weekdayBtns = weekdayOptions.querySelectorAll('.weekday-btn');
+        weekdayBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                btn.classList.toggle('active');
+            });
+        });
+        
         // 日付ボタンのクリックイベント
         const dateBtns = dateOptions.querySelectorAll('.date-btn');
         dateBtns.forEach(btn => {
@@ -262,10 +345,10 @@ async function saveEdit(id) {
     }
     
     if (repeatType === 'weekdays') {
-        weekdays = getSelectedWeekdays();
+        weekdays = getSelectedEditWeekdays();
     }
     if (repeatType === 'monthly-dates') {
-        dates = getSelectedDates();
+        dates = getSelectedEditDates();
     }
     const updatedAlert = {
         content: content,
@@ -891,6 +974,18 @@ function resetDateOptions() {
 // 選択された日付を取得
 function getSelectedDates() {
     const dateBtns = document.querySelectorAll('#date-options .date-btn.active');
+    return Array.from(dateBtns).map(btn => parseInt(btn.dataset.date));
+}
+
+// 編集フォーム用：選択された曜日を取得
+function getSelectedEditWeekdays() {
+    const weekdayBtns = document.querySelectorAll('#edit-weekday-options .weekday-btn.active');
+    return Array.from(weekdayBtns).map(btn => parseInt(btn.dataset.day));
+}
+
+// 編集フォーム用：選択された日付を取得
+function getSelectedEditDates() {
+    const dateBtns = document.querySelectorAll('#edit-date-options .date-btn.active');
     return Array.from(dateBtns).map(btn => parseInt(btn.dataset.date));
 }
 
