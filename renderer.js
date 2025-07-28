@@ -592,6 +592,7 @@ async function addAlert() {
             await loadAlerts();
             updateTimeline();
             showCuteAlert('通知を追加しました！', 'info');
+            clearForm(); // フォームをクリア
             if (formExpanded) toggleForm();
             return true;
         }
@@ -602,6 +603,67 @@ async function addAlert() {
     }
 }
 let formExpanded = false;
+
+// フォームに現在の日付と時刻を設定する関数
+function setDefaultDateTime() {
+    const now = new Date();
+    
+    // 現在時刻から30分後を設定
+    const futureTime = new Date(now.getTime() + 30 * 60000);
+    
+    const dateInput = document.getElementById('alert-date');
+    const timeInput = document.getElementById('alert-time');
+    
+    if (dateInput && !dateInput.value) {
+        const year = futureTime.getFullYear();
+        const month = (futureTime.getMonth() + 1).toString().padStart(2, '0');
+        const day = futureTime.getDate().toString().padStart(2, '0');
+        dateInput.value = `${year}-${month}-${day}`;
+    }
+    
+    if (timeInput && !timeInput.value) {
+        const hours = futureTime.getHours().toString().padStart(2, '0');
+        const minutes = futureTime.getMinutes().toString().padStart(2, '0');
+        timeInput.value = `${hours}:${minutes}`;
+    }
+}
+
+// フォームをクリアする関数
+function clearForm() {
+    document.getElementById('alert-content').value = '';
+    document.getElementById('alert-date').value = '';
+    document.getElementById('alert-time').value = '';
+    document.getElementById('alert-url').value = '';
+    
+    // 事前通知を「なし」に戻す
+    const reminderSelect = document.getElementById('reminder-minutes');
+    if (reminderSelect) {
+        reminderSelect.value = '0';
+    }
+    
+    // 繰り返し設定を「なし」に戻す
+    const repeatSelect = document.getElementById('repeat-type');
+    if (repeatSelect) {
+        repeatSelect.value = 'none';
+    }
+    
+    // 曜日・日付選択をリセット
+    resetWeekdayOptions();
+    resetDateOptions();
+    
+    // 繰り返しオプションを非表示にする
+    toggleRepeatOptions();
+    
+    // URLフィールドのスタイルをリセット
+    const urlInput = document.getElementById('alert-url');
+    if (urlInput) {
+        urlInput.style.borderColor = '#e8f4ff';
+        urlInput.style.boxShadow = 'none';
+    }
+    
+    // フォーム妥当性チェックを更新
+    validateFormInputs();
+}
 
 function toggleForm() {
     const formContent = document.getElementById('form-content');
@@ -619,7 +681,12 @@ function toggleForm() {
         // フォームのスクロール位置を一番上に戻す
         setTimeout(() => {
             formContent.scrollTop = 0;
-        }, 50); // アニメーション後にスクロール
+            // 通知内容入力にフォーカス
+            const contentInput = document.getElementById('alert-content');
+            if (contentInput && !contentInput.value.trim()) {
+                contentInput.focus();
+            }
+        }, 50); // アニメーション後にスクロールとフォーカス
     } else {
         formContent.classList.remove('active');
         toggleBtn.classList.remove('active');
