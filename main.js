@@ -910,7 +910,14 @@ function scheduleNotification(alert) {
   const alertTime = new Date(alert.dateTime);
   const now = new Date();
   
-  console.log(`スケジュール処理開始: ID=${alert.id}, 時刻=${alertTime}, 現在時刻=${now}`);
+  console.log(`スケジュール処理開始: ID=${alert.id}, 時刻=${alertTime}, 現在時刻=${now}, 繰り返し=${alert.repeatType}`);
+  
+  // 曜日指定・日付指定の場合は、現在日時ベースで次回時刻を再計算
+  if ((alert.repeatType === 'weekdays' || alert.repeatType === 'monthly-dates') && alertTime <= now) {
+    console.log(`曜日/日付指定アラートの過去時刻を検出、次回時刻を再計算: ID=${alert.id}`);
+    scheduleNextRepeat(alert);
+    return;
+  }
   
   if (alertTime > now) {
     const delay = alertTime.getTime() - now.getTime();
@@ -969,6 +976,8 @@ function scheduleNotification(alert) {
       }
       alertTimers.get(alert.id).push(mainTimer);
     }
+  } else {
+    console.log(`アラート時刻が過去のため、スケジュールしません: ID=${alert.id}, 時刻=${alertTime}`);
   }
   
   // n分前の通知
@@ -1040,10 +1049,12 @@ function scheduleNextRepeat(alert) {
       
     case 'weekdays':
       // 曜日指定：次の該当曜日
+      console.log(`曜日指定アラート処理: ID=${alert.id}, 指定曜日=${alert.weekdays}, 元の時刻=${currentTime}`);
       nextTime = getNextWeekdayTime(now, alert.weekdays);
       if (nextTime) {
         // 時刻を元のアラート時刻に設定
         nextTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
+        console.log(`次回曜日指定アラート: ${nextTime}, 曜日=${nextTime.getDay()}`);
       }
       break;
       
@@ -1097,18 +1108,22 @@ function getNextWeekdayTime(currentTime, weekdays) {
   }
   
   const now = new Date();
+  console.log(`曜日検索開始: 現在=${now}, 指定曜日=${weekdays}`);
   
   // 明日から始めて、次の該当曜日を探す
   for (let i = 1; i <= 7; i++) {
     const testDate = new Date(now.getTime() + (i * 24 * 60 * 60 * 1000));
     const dayOfWeek = testDate.getDay();
+    console.log(`  チェック中: ${testDate}, 曜日=${dayOfWeek}, 該当=${weekdays.includes(dayOfWeek)}`);
     
     if (weekdays.includes(dayOfWeek)) {
+      console.log(`  -> 次の該当曜日を発見: ${testDate}`);
       return testDate;
     }
   }
   
   // 見つからない場合は1週間後（フォールバック）
+  console.log('  -> フォールバック: 1週間後');
   return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 }
 

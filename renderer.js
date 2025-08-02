@@ -155,7 +155,7 @@ function showEditForm(alert) {
                 <div class="form-row">
                     <div class="form-group">
                         <label>日付</label>
-                        <input type="date" id="edit-date" value="${date}" class="edit-input">
+                        <input type="date" id="edit-date" value="${date}" class="edit-input date-time-field">
                     </div>
                     <div class="form-group">
                         <label>時間</label>
@@ -260,6 +260,7 @@ function showEditForm(alert) {
         const repeatTypeSelect = document.getElementById('edit-repeat');
         const weekdayOptions = document.getElementById('edit-weekday-options');
         const dateOptions = document.getElementById('edit-date-options');
+        const editDateTimeFields = document.querySelectorAll('.edit-modal .date-time-field');
         
         // 繰り返しオプションの初期表示設定
         function updateEditRepeatOptions() {
@@ -277,6 +278,17 @@ function showEditForm(alert) {
                 dateOptions.style.display = 'block';
             } else {
                 dateOptions.style.display = 'none';
+            }
+            
+            // 日付フィールドの表示制御（曜日指定・日付指定時は非表示）
+            if (repeatType === 'weekdays' || repeatType === 'monthly-dates') {
+                editDateTimeFields.forEach(field => {
+                    field.style.display = 'none';
+                });
+            } else {
+                editDateTimeFields.forEach(field => {
+                    field.style.display = 'block';
+                });
             }
         }
         
@@ -642,6 +654,7 @@ async function addAlert() {
     const url = document.getElementById('alert-url').value.trim();
     const reminderMinutes = parseInt(document.getElementById('reminder-minutes')?.value || '0');
     const repeatType = document.getElementById('repeat-type')?.value || 'none';
+    
     // 変数宣言は1回のみ
     var weekdays = [];
     var dates = [];
@@ -651,15 +664,111 @@ async function addAlert() {
     if (repeatType === 'monthly-dates') {
         dates = getSelectedDates();
     }
-    if (!content || !date || !time) {
-        showCuteAlert('通知内容、日付、時間を入力してください。', 'error');
+    
+    if (!content) {
+        showCuteAlert('通知内容を入力してください。', 'error');
         return false;
     }
-    const dateTime = new Date(`${date}T${time}`);
-    if (dateTime <= new Date()) {
-        showCuteAlert('未来の日時を選択してください。', 'error');
+    
+    // 時間は常に必要
+    if (!time) {
+        showCuteAlert('時間を入力してください。', 'error');
         return false;
     }
+    
+    let dateTime;
+    
+    // 曜日指定・日付指定の場合は現在日時から計算
+    if (repeatType === 'weekdays') {
+        if (weekdays.length === 0) {
+            showCuteAlert('曜日を選択してください。', 'error');
+            return false;
+        }
+        
+        // 現在日時から次の該当曜日を計算
+        const now = new Date();
+        let nextDate = null;
+        
+        // 明日から始めて、次の該当曜日を探す
+        for (let i = 1; i <= 7; i++) {
+            const testDate = new Date(now.getTime() + (i * 24 * 60 * 60 * 1000));
+            const dayOfWeek = testDate.getDay();
+            
+            if (weekdays.includes(dayOfWeek)) {
+                nextDate = testDate;
+                break;
+            }
+        }
+        
+        if (!nextDate) {
+            showCuteAlert('次回の曜日を計算できませんでした。', 'error');
+            return false;
+        }
+        
+        // 時刻を設定
+        const [hours, minutes] = time.split(':');
+        nextDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        dateTime = nextDate;
+        
+    } else if (repeatType === 'monthly-dates') {
+        if (dates.length === 0) {
+            showCuteAlert('日付を選択してください。', 'error');
+            return false;
+        }
+        
+        // 現在日時から次の該当日付を計算
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        const currentDate = now.getDate();
+        
+        // 今月の指定日付の中で、今日より後の最も早い日付を探す
+        const sortedDates = [...dates].sort((a, b) => a - b);
+        let nextDate = null;
+        
+        for (const date of sortedDates) {
+            if (date > currentDate) {
+                const testDate = new Date(currentYear, currentMonth, date);
+                if (testDate > now) {
+                    nextDate = testDate;
+                    break;
+                }
+            }
+        }
+        
+        // 今月に該当する日付がない場合は来月の最初の指定日付
+        if (!nextDate) {
+            const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+            const nextYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+            const firstDate = Math.min(...sortedDates);
+            nextDate = new Date(nextYear, nextMonth, firstDate);
+            
+            // 月末日を考慮して調整
+            const daysInMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+            if (firstDate > daysInMonth) {
+                nextDate.setDate(daysInMonth);
+            }
+        }
+        
+        // 時刻を設定
+        const [hours, minutes] = time.split(':');
+        nextDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        dateTime = nextDate;
+        
+    } else {
+        // 通常の場合（日付が必要）
+        if (!date) {
+            showCuteAlert('日付を入力してください。', 'error');
+            return false;
+        }
+        
+        dateTime = new Date(`${date}T${time}`);
+        if (dateTime <= new Date()) {
+            showCuteAlert('未来の日時を選択してください。', 'error');
+            return false;
+        }
+    }
+    
     const newAlert = {
         content: content,
         dateTime: dateTime.toISOString(),
@@ -669,6 +778,7 @@ async function addAlert() {
         weekdays: weekdays,
         dates: dates
     };
+    
     try {
         const savedAlert = await ipcRenderer.invoke('add-alert', newAlert);
         if (savedAlert) {
@@ -783,10 +893,24 @@ function validateFormInputs() {
     const date = document.getElementById('alert-date').value;
     const time = document.getElementById('alert-time').value;
     const url = document.getElementById('alert-url').value.trim();
+    const repeatType = document.getElementById('repeat-type').value;
     const addBtn = document.querySelector('.add-btn-compact');
     
-    // 必須フィールドのチェック
-    const hasRequiredFields = content && date && time;
+    // 繰り返しタイプによって必須フィールドを判定
+    let hasRequiredFields = false;
+    
+    if (repeatType === 'weekdays') {
+        // 曜日指定の場合：内容、時間、曜日選択が必要
+        const selectedWeekdays = getSelectedWeekdays();
+        hasRequiredFields = content && time && selectedWeekdays.length > 0;
+    } else if (repeatType === 'monthly-dates') {
+        // 日付指定の場合：内容、時間、日付選択が必要
+        const selectedDates = getSelectedDates();
+        hasRequiredFields = content && time && selectedDates.length > 0;
+    } else {
+        // 通常の場合：内容、日付、時間が必要
+        hasRequiredFields = content && date && time;
+    }
     
     // URLが入力されている場合は、有効性をチェック
     let isUrlValid = true;
@@ -926,6 +1050,7 @@ function toggleRepeatOptions() {
     const repeatType = document.getElementById('repeat-type').value;
     const weekdayOptions = document.getElementById('weekday-options');
     const dateOptions = document.getElementById('date-options');
+    const dateTimeFields = document.querySelectorAll('.date-time-field');
     
     // 曜日選択の表示制御
     if (repeatType === 'weekdays') {
@@ -942,6 +1067,20 @@ function toggleRepeatOptions() {
         dateOptions.style.display = 'none';
         resetDateOptions();
     }
+    
+    // 日付フィールドの表示制御（曜日指定・日付指定時は非表示）
+    if (repeatType === 'weekdays' || repeatType === 'monthly-dates') {
+        dateTimeFields.forEach(field => {
+            field.style.display = 'none';
+        });
+    } else {
+        dateTimeFields.forEach(field => {
+            field.style.display = 'block';
+        });
+    }
+    
+    // フォームの妥当性を再チェック
+    validateFormInputs();
 }
 
 // 曜日選択の表示/非表示を切り替え（後方互換性のため）
@@ -1015,6 +1154,8 @@ document.addEventListener('DOMContentLoaded', function() {
     weekdayBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             btn.classList.toggle('active');
+            // フォームの妥当性を再チェック
+            validateFormInputs();
         });
     });
 
@@ -1023,8 +1164,23 @@ document.addEventListener('DOMContentLoaded', function() {
     dateBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             btn.classList.toggle('active');
+            // フォームの妥当性を再チェック
+            validateFormInputs();
         });
     });
+    
+    // フォーム入力フィールドの変更を監視
+    const contentInput = document.getElementById('alert-content');
+    const dateInput = document.getElementById('alert-date');
+    const timeInput = document.getElementById('alert-time');
+    const urlInput = document.getElementById('alert-url');
+    const repeatSelect = document.getElementById('repeat-type');
+    
+    if (contentInput) contentInput.addEventListener('input', validateFormInputs);
+    if (dateInput) dateInput.addEventListener('change', validateFormInputs);
+    if (timeInput) timeInput.addEventListener('change', validateFormInputs);
+    if (urlInput) urlInput.addEventListener('input', validateFormInputs);
+    if (repeatSelect) repeatSelect.addEventListener('change', validateFormInputs);
 
     // 設定を読み込み
     loadSettingsFromStorage();
