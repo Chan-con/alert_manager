@@ -67,10 +67,8 @@ function createWindow() {
 // ここから下はcreateWindow関数の続き
   mainWindow.loadFile('index.html');
   
-  // 開発時のみDevToolsを開く
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.webContents.openDevTools();
-  }
+  // DevToolsを常に開く（デバッグ用）
+  // mainWindow.webContents.openDevTools();
 
   // ウィンドウが閉じられたときの処理（タスクトレイに格納）
   mainWindow.on('close', (event) => {
@@ -490,6 +488,192 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
 
+// 繰り返し通知の次回スケジュール
+function scheduleNextRepeat(alert) {
+  if (!alert.repeatType || alert.repeatType === 'none') {
+    return;
+  }
+  
+  const now = new Date();
+  const currentTime = new Date(alert.dateTime);
+  let nextTime = null;
+  
+  switch (alert.repeatType) {
+    case 'daily':
+      // 毎日：次の日の同じ時刻
+      nextTime = new Date(currentTime);
+      nextTime.setDate(nextTime.getDate() + 1);
+      break;
+      
+    case 'weekly':
+      // 毎週：次週の同じ曜日・時刻
+      nextTime = new Date(currentTime);
+      nextTime.setDate(nextTime.getDate() + 7);
+      break;
+      
+    case 'weekdays':
+      // 曜日指定：次の該当曜日
+      console.log(`曜日指定アラート処理: ID=${alert.id}, 指定曜日=${JSON.stringify(alert.weekdays)}, 元の時刻=${currentTime}`);
+      
+      if (!alert.weekdays || !Array.isArray(alert.weekdays) || alert.weekdays.length === 0) {
+        console.error(`曜日指定アラートの曜日データが不正です: ID=${alert.id}, weekdays=${JSON.stringify(alert.weekdays)}`);
+        throw new Error('曜日データが不正です');
+      }
+      
+      nextTime = getNextWeekdayTime(currentTime, alert.weekdays);
+      if (nextTime) {
+        // 時刻を元のアラート時刻に設定
+        nextTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
+        console.log(`次回曜日指定アラート: ${nextTime}, 曜日=${nextTime.getDay()}`);
+      } else {
+        console.error(`曜日指定アラートの次回時刻を計算できませんでした: ID=${alert.id}`);
+        throw new Error('次回時刻を計算できませんでした');
+      }
+      break;
+      
+    case 'monthly':
+      // 毎月：次月の同じ日付・時刻
+      nextTime = new Date(currentTime);
+      nextTime.setMonth(nextTime.getMonth() + 1);
+      break;
+      
+    case 'monthly-dates':
+      // 毎月指定日：次の該当日付
+      console.log(`毎月指定日アラート処理: ID=${alert.id}, 指定日=${JSON.stringify(alert.dates)}, 元の時刻=${currentTime}`);
+      
+      if (!alert.dates || !Array.isArray(alert.dates) || alert.dates.length === 0) {
+        console.error(`毎月指定日アラートの日付データが不正です: ID=${alert.id}, dates=${JSON.stringify(alert.dates)}`);
+        throw new Error('日付データが不正です');
+      }
+      
+      nextTime = getNextMonthlyDateTime(now, alert.dates);
+      if (nextTime) {
+        // 時刻を元のアラート時刻に設定
+        nextTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
+        console.log(`次回毎月指定日アラート: ${nextTime}, 日付=${nextTime.getDate()}`);
+      } else {
+        console.error(`毎月指定日アラートの次回時刻を計算できませんでした: ID=${alert.id}`);
+        throw new Error('次回時刻を計算できませんでした');
+      }
+      break;
+  }
+  
+  if (nextTime && nextTime > now) {
+    // アラートの日時を更新
+    alert.dateTime = nextTime.toISOString();
+    
+    // アラート配列内の該当アラートも更新
+    const alertIndex = alerts.findIndex(a => a.id === alert.id);
+    if (alertIndex !== -1) {
+      alerts[alertIndex].dateTime = nextTime.toISOString();
+    }
+    
+    // データを保存
+    saveAlerts();
+    
+    // 次回の通知をスケジュール
+    scheduleNotification(alert);
+    
+    // レンダラープロセスに更新を通知
+    if (mainWindow) {
+      mainWindow.webContents.send('alert-updated');
+    }
+    
+    console.log(`繰り返しアラートの次回をスケジュール: ${alert.id}, 次回時刻: ${nextTime}`);
+  } else {
+    const errorMessage = `繰り返しアラートの次回時刻を計算できませんでした: ID=${alert.id}, nextTime=${nextTime}`;
+    console.error(errorMessage);
+    throw new Error('次回の実行時刻を計算できませんでした');
+  }
+}
+
+// 次の指定曜日の時間を取得
+function getNextWeekdayTime(currentTime, weekdays) {
+  if (!weekdays || weekdays.length === 0) {
+    return new Date(currentTime.getTime() + 24 * 60 * 60 * 1000); // 1日後
+  }
+  
+  const now = new Date();
+  const currentDate = new Date(currentTime);
+  console.log(`曜日検索開始: 現在時刻=${now}, 現在のアラート時刻=${currentDate}, 指定曜日=${weekdays}`);
+  
+  // 現在のアラート時刻が未来の場合は、その次の該当曜日を探す
+  const searchStart = currentDate > now ? currentDate : now;
+  console.log(`検索開始時刻: ${searchStart}`);
+  
+  // 明日から始めて、次の該当曜日を探す
+  for (let i = 1; i <= 7; i++) {
+    const testDate = new Date(searchStart.getTime() + (i * 24 * 60 * 60 * 1000));
+    const dayOfWeek = testDate.getDay();
+    console.log(`  チェック中: ${testDate}, 曜日=${dayOfWeek}, 該当=${weekdays.includes(dayOfWeek)}`);
+    
+    if (weekdays.includes(dayOfWeek)) {
+      console.log(`  -> 次の該当曜日を発見: ${testDate}`);
+      return testDate;
+    }
+  }
+  
+  // 見つからない場合は1週間後（フォールバック）
+  console.log('  -> フォールバック: 1週間後');
+  return new Date(searchStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+}
+
+// 次の指定日付の時間を取得
+function getNextMonthlyDateTime(currentTime, dates) {
+  if (!dates || dates.length === 0) {
+    // 日付が指定されていない場合は次の月の同じ日
+    const nextMonth = new Date(currentTime);
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    return nextMonth;
+  }
+  
+  const now = new Date();
+  
+  // 今月の残りの日付をチェック
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const currentDate = now.getDate();
+  
+  // 今月の指定日付の中で、今日より後の最も早い日付を探す
+  const sortedDates = [...dates].sort((a, b) => a - b);
+  for (const date of sortedDates) {
+    if (date > currentDate) {
+      const nextDate = new Date(currentYear, currentMonth, date);
+      if (nextDate > now) {
+        return nextDate;
+      }
+    }
+  }
+  
+  // 今月に該当する日付がない場合は来月の最初の指定日付
+  const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+  const nextYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+  
+  // 来月の最初の指定日付
+  const firstDate = Math.min(...sortedDates);
+  const nextMonthDate = new Date(nextYear, nextMonth, firstDate);
+  
+  // 月末日を考慮して調整
+  const daysInMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+  if (firstDate > daysInMonth) {
+    // 指定日が存在しない場合は月末日に設定
+    nextMonthDate.setDate(daysInMonth);
+  }
+  
+  return nextMonthDate;
+}
+
+// 期限切れの通知を削除
+function deleteExpiredAlert(id) {
+  clearAlertTimers(id);
+  alerts = alerts.filter(alert => alert.id !== id);
+  saveAlerts();
+  // レンダラープロセスに削除を通知
+  if (mainWindow) {
+    mainWindow.webContents.send('alert-deleted', id);
+  }
+}
+
 // IPC通信の設定
 ipcMain.handle('get-alerts', () => {
   return alerts;
@@ -623,15 +807,42 @@ ipcMain.handle('close-window', () => {
 
 ipcMain.handle('skip-alert', (event, id) => {
   const alert = alerts.find(a => a.id === id);
-  if (!alert) return false;
+  if (!alert) {
+    console.error(`スキップ対象のアラートが見つかりません: ID=${id}`);
+    return { success: false, error: 'アラートが見つかりません' };
+  }
+  
+  console.log(`アラートスキップ処理開始: ID=${id}, 繰り返しタイプ=${alert.repeatType}`);
+  console.log(`アラート詳細: weekdays=${JSON.stringify(alert.weekdays)}, dates=${JSON.stringify(alert.dates)}`);
+  console.log(`アラート完全情報:`, alert);
   
   // 繰り返しアラートの場合は次回の時間に更新
   if (alert.repeatType && alert.repeatType !== 'none') {
-    scheduleNextRepeat(alert);
-    return true;
+    try {
+      console.log(`スキップ前のアラート時刻: ${alert.dateTime}`);
+      scheduleNextRepeat(alert);
+      console.log(`スキップ後のアラート時刻: ${alert.dateTime}`);
+      console.log(`繰り返しアラートを次回にスキップしました: ID=${id}`);
+      
+      // UIを強制的に更新
+      if (mainWindow) {
+        mainWindow.webContents.send('alert-updated');
+        console.log('UIに更新通知を送信しました');
+      }
+      
+      return { success: true, message: '次回の予定にスキップしました' };
+    } catch (error) {
+      console.error(`繰り返しアラートのスキップに失敗: ID=${id}`, error);
+      const errorMessage = error && error.message ? error.message : 
+                          error && typeof error === 'string' ? error : 
+                          'スキップ処理でエラーが発生しました';
+      return { success: false, error: errorMessage };
+    }
+  } else {
+    // 繰り返しでないアラートの場合はスキップできない
+    console.log(`繰り返しでないアラートはスキップできません: ID=${id}`);
+    return { success: false, error: '繰り返しでないアラートはスキップできません' };
   }
-  
-  return false;
 });
 
 ipcMain.handle('toggle-window', () => {
@@ -1012,186 +1223,14 @@ function scheduleNotification(alert) {
             openNewBrowserWindow(alert.url);
           }
         }, reminderDelay);
-      
-      // リマインダータイマーも保存
-      if (!alertTimers.has(alert.id)) {
-        alertTimers.set(alert.id, []);
-      }
-      alertTimers.get(alert.id).push(reminderTimer);
-    }
-  } else {
-    console.log(`アラート時刻が過去のため、スケジュールしません: ID=${alert.id}, 時刻=${alertTime}`);
-  }
-}
-
-// 繰り返し通知の次回スケジュール
-function scheduleNextRepeat(alert) {
-  if (!alert.repeatType || alert.repeatType === 'none') {
-    return;
-  }
-  
-  const now = new Date();
-  const currentTime = new Date(alert.dateTime);
-  let nextTime = null;
-  
-  switch (alert.repeatType) {
-    case 'daily':
-      // 毎日：次の日の同じ時刻
-      nextTime = new Date(currentTime);
-      nextTime.setDate(nextTime.getDate() + 1);
-      break;
-      
-    case 'weekly':
-      // 毎週：次週の同じ曜日・時刻
-      nextTime = new Date(currentTime);
-      nextTime.setDate(nextTime.getDate() + 7);
-      break;
-      
-    case 'weekdays':
-      // 曜日指定：次の該当曜日
-      console.log(`曜日指定アラート処理: ID=${alert.id}, 指定曜日=${alert.weekdays}, 元の時刻=${currentTime}`);
-      nextTime = getNextWeekdayTime(now, alert.weekdays);
-      if (nextTime) {
-        // 時刻を元のアラート時刻に設定
-        nextTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
-        console.log(`次回曜日指定アラート: ${nextTime}, 曜日=${nextTime.getDay()}`);
-      }
-      break;
-      
-    case 'monthly':
-      // 毎月：次月の同じ日付・時刻
-      nextTime = new Date(currentTime);
-      nextTime.setMonth(nextTime.getMonth() + 1);
-      break;
-      
-    case 'monthly-dates':
-      // 毎月指定日：次の該当日付
-      nextTime = getNextMonthlyDateTime(now, alert.dates);
-      if (nextTime) {
-        // 時刻を元のアラート時刻に設定
-        nextTime.setHours(currentTime.getHours(), currentTime.getMinutes(), 0, 0);
-      }
-      break;
-  }
-  
-  if (nextTime && nextTime > now) {
-    // アラートの日時を更新
-    alert.dateTime = nextTime.toISOString();
-    
-    // アラート配列内の該当アラートも更新
-    const alertIndex = alerts.findIndex(a => a.id === alert.id);
-    if (alertIndex !== -1) {
-      alerts[alertIndex].dateTime = nextTime.toISOString();
-    }
-    
-    // データを保存
-    saveAlerts();
-    
-    // 次回の通知をスケジュール
-    scheduleNotification(alert);
-    
-    // レンダラープロセスに更新を通知
-    if (mainWindow) {
-      mainWindow.webContents.send('alert-updated');
-    }
-    
-    console.log(`繰り返しアラートの次回をスケジュール: ${alert.id}, 次回時刻: ${nextTime}`);
-  } else {
-    console.warn(`繰り返しアラートの次回時刻を計算できませんでした: ${alert.id}`);
-  }
-}
-
-// 次の指定曜日の時間を取得
-function getNextWeekdayTime(currentTime, weekdays) {
-  if (!weekdays || weekdays.length === 0) {
-    return new Date(currentTime.getTime() + 24 * 60 * 60 * 1000); // 1日後
-  }
-  
-  const now = new Date();
-  console.log(`曜日検索開始: 現在=${now}, 指定曜日=${weekdays}`);
-  
-  // 明日から始めて、次の該当曜日を探す
-  for (let i = 1; i <= 7; i++) {
-    const testDate = new Date(now.getTime() + (i * 24 * 60 * 60 * 1000));
-    const dayOfWeek = testDate.getDay();
-    console.log(`  チェック中: ${testDate}, 曜日=${dayOfWeek}, 該当=${weekdays.includes(dayOfWeek)}`);
-    
-    if (weekdays.includes(dayOfWeek)) {
-      console.log(`  -> 次の該当曜日を発見: ${testDate}`);
-      return testDate;
-    }
-  }
-  
-  // 見つからない場合は1週間後（フォールバック）
-  console.log('  -> フォールバック: 1週間後');
-  return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-}
-
-// 次の指定日付の時間を取得
-function getNextMonthlyDateTime(currentTime, dates) {
-  if (!dates || dates.length === 0) {
-    // 日付が指定されていない場合は次の月の同じ日
-    const nextMonth = new Date(currentTime);
-    nextMonth.setMonth(nextMonth.getMonth() + 1);
-    return nextMonth;
-  }
-  
-  const now = new Date();
-  
-  // 今月の残りの日付をチェック
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-  const currentDate = now.getDate();
-  
-  // 今月の指定日付の中で、今日より後の最も早い日付を探す
-  const sortedDates = [...dates].sort((a, b) => a - b);
-  for (const date of sortedDates) {
-    if (date > currentDate) {
-      const nextDate = new Date(currentYear, currentMonth, date);
-      if (nextDate > now) {
-        return nextDate;
+        
+        // リマインダータイマーも保存
+        if (!alertTimers.has(alert.id)) {
+          alertTimers.set(alert.id, []);
+        }
+        alertTimers.get(alert.id).push(reminderTimer);
       }
     }
   }
-  
-  // 今月に該当する日付がない場合は来月の最初の指定日付
-  const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
-  const nextYear = currentMonth === 11 ? currentYear + 1 : currentYear;
-  
-  // 来月の最初の指定日付
-  const firstDate = Math.min(...sortedDates);
-  const nextMonthDate = new Date(nextYear, nextMonth, firstDate);
-  
-  // 月末日を考慮して調整
-  const daysInMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
-  if (firstDate > daysInMonth) {
-    // 指定日が存在しない場合は月末日に設定
-    nextMonthDate.setDate(daysInMonth);
-  }
-  
-  return nextMonthDate;
-}
-
-// アラートのタイマーをクリア
-function clearAlertTimers(alertId) {
-  if (alertTimers.has(alertId)) {
-    const timers = alertTimers.get(alertId);
-    timers.forEach(timer => clearTimeout(timer));
-    alertTimers.delete(alertId);
-  }
-}
-
-// 期限切れの通知を削除
-function deleteExpiredAlert(id) {
-  clearAlertTimers(id);
-  alerts = alerts.filter(alert => alert.id !== id);
-  saveAlerts();
-  // レンダラープロセスに削除を通知
-  if (mainWindow) {
-    mainWindow.webContents.send('alert-deleted', id);
-  }
-}
-
-// ファイル全体の閉じ括弧（不足分）
 }
 

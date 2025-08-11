@@ -1,11 +1,13 @@
 const { ipcRenderer } = require('electron');
 // 通知更新イベントでタイムラインを即時リフレッシュ
 ipcRenderer.on('alert-updated', async () => {
+    console.log('🔔 alert-updatedイベントを受信、タイムラインをリフレッシュします');
     try {
         await loadAlerts();
         updateTimeline();
+        console.log('✅ alert-updatedによるタイムラインリフレッシュ完了');
     } catch (e) {
-        console.error('タイムラインリフレッシュ失敗:', e);
+        console.error('❌ alert-updatedタイムラインリフレッシュ失敗:', e);
     }
 });
 
@@ -14,9 +16,14 @@ let alerts = [];
 // アラート一覧をメインプロセスから取得
 async function loadAlerts() {
     try {
+        console.log('loadAlerts開始: メインプロセスからアラート取得中...');
         const result = await ipcRenderer.invoke('get-alerts');
         if (Array.isArray(result)) {
             alerts = result;
+            console.log('loadAlerts成功: 取得したアラート数=', alerts.length);
+            alerts.forEach((alert, index) => {
+                console.log(`  Alert ${index}: ID=${alert.id}, 時刻=${alert.dateTime}, 繰り返し=${alert.repeatType}`);
+            });
         } else {
             alerts = [];
             console.error('get-alertsの結果が配列ではありません:', result);
@@ -58,8 +65,16 @@ function getNextOccurrence(alert, now) {
             // 指定曜日の次回
             const weekdays = alert.weekdays || [];
             if (weekdays.length === 0) return null;
-            let candidate = new Date(now);
+            
+            // アラート時刻が未来の場合はそれをベースに、過去の場合は現在時刻をベースに
+            let candidate = base > now ? new Date(base) : new Date(now);
             candidate.setHours(base.getHours(), base.getMinutes(), 0, 0);
+            
+            // アラート時刻が未来で、かつその曜日が指定曜日に含まれている場合はそのまま返す
+            if (base > now && weekdays.includes(base.getDay())) {
+                return base;
+            }
+            
             for (let i = 0; i < 14; i++) { // 2週間分
                 if (weekdays.includes(candidate.getDay()) && candidate > now) {
                     // 1年より未来は異常とみなす
@@ -399,46 +414,71 @@ function closeEditModal() {
 
 // タイムラインを更新
 function updateTimeline() {
+    console.log('🔄 updateTimeline開始: alerts数=', alerts.length);
     const timeline = document.getElementById('timeline');
     
     if (alerts.length === 0) {
         timeline.innerHTML = '<div class="empty-timeline">まだ通知がありません<br>新しい通知を追加してみましょう！</div>';
+        console.log('📝 アラートが0件のため空のタイムラインを表示');
         return;
     }
 
     const now = new Date();
+    console.log('⏰ 現在時刻:', now);
+    console.log('📋 処理対象のアラート詳細:');
+    alerts.forEach((alert, index) => {
+        console.log(`  [${index}] ID=${alert.id}, 時刻=${alert.dateTime}, 繰り返し=${alert.repeatType}`);
+    });
+    
     const allAlerts = alerts.map(alert => {
         let alertTime;
         if (!alert.repeatType || alert.repeatType === 'none') {
             alertTime = new Date(alert.dateTime);
             // 単発アラートは過去分も履歴として残す
+            console.log(`  単発アラート: ID=${alert.id}, 表示時刻=${alertTime}`);
             return { ...alert, nextTime: alertTime };
         } else {
             // 繰り返しアラートは次回分のみ表示（過去分は除外）
             alertTime = getNextOccurrence(alert, now);
-            if (!(alertTime instanceof Date) || isNaN(alertTime.getTime())) return null;
+            if (!(alertTime instanceof Date) || isNaN(alertTime.getTime())) {
+                console.log(`  繰り返しアラート: ID=${alert.id}, 次回時刻計算失敗`);
+                return null;
+            }
+            console.log(`  繰り返しアラート: ID=${alert.id}, 次回時刻=${alertTime}`);
             return { ...alert, nextTime: alertTime };
         }
-    }).filter(a => a && a.nextTime && a.nextTime instanceof Date && !isNaN(a.nextTime.getTime()));
+    }).filter(alert => alert !== null);
+    
+    console.log('🔍 フィルタリング後のアラート数:', allAlerts.length);
+    allAlerts.forEach((alert, index) => {
+        console.log(`  表示予定[${index}]: ID=${alert.id}, 表示時刻=${alert.nextTime}`);
+    });
 
     if (allAlerts.length === 0) {
         timeline.innerHTML = '<div class="empty-timeline">通知データがありません<br>新しい通知を追加してみましょう！</div>';
+        console.log('📝 表示可能なアラートがないため空のタイムライン表示');
         return;
     }
 
     // 日時順にソート（早い順）
     const sortedAlerts = [...allAlerts].sort((a, b) => a.nextTime - b.nextTime);
+    console.log('📊 ソート後の順序:');
+    sortedAlerts.forEach((alert, index) => {
+        console.log(`  [${index}] ID=${alert.id}, 時刻=${alert.nextTime}`);
+    });
 
     // future/past判定
     const futureCount = sortedAlerts.filter(a => a.nextTime >= now).length;
     const pastCount = sortedAlerts.length - futureCount;
+    console.log(`📈 未来: ${futureCount}件, 過去: ${pastCount}件`);
 
     let headerHtml = '';
     if (futureCount === 0 && pastCount > 0) {
         headerHtml = '<div class="empty-timeline">過去の通知のみです（履歴表示）<br>新しい通知を追加してみましょう！</div>';
     }
 
-    timeline.innerHTML = headerHtml + sortedAlerts.map(alert => {
+    console.log('🎨 HTML生成開始...');
+    const timelineHtml = headerHtml + sortedAlerts.map(alert => {
         const alertTime = alert.nextTime;
         if (!(alertTime instanceof Date) || isNaN(alertTime.getTime())) return '';
         const isPast = alertTime < now;
@@ -472,84 +512,10 @@ function updateTimeline() {
             </div>
         `;
     }).join('');
-// 繰り返しアラートの次回発生日時を計算
-function getNextOccurrence(alert, now) {
-    const base = new Date(alert.dateTime);
-    let next = null;
-    switch (alert.repeatType) {
-        case 'daily': {
-            next = new Date(base);
-            let maxLoop = 4000; // 約10年分
-            while (next <= now && maxLoop-- > 0) {
-                next.setDate(next.getDate() + 1);
-            }
-            if (maxLoop <= 0) return null;
-            // 1年より未来は異常とみなす
-            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
-            return next > now ? next : null;
-        }
-        case 'weekly': {
-            next = new Date(base);
-            let maxLoop = 1000; // 約20年分
-            while (next <= now && maxLoop-- > 0) {
-                next.setDate(next.getDate() + 7);
-            }
-            if (maxLoop <= 0) return null;
-            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
-            return next > now ? next : null;
-        }
-        case 'weekdays': {
-            // 指定曜日の次回
-            const weekdays = alert.weekdays || [];
-            if (weekdays.length === 0) return null;
-            let candidate = new Date(now);
-            candidate.setHours(base.getHours(), base.getMinutes(), 0, 0);
-            for (let i = 0; i < 14; i++) { // 2週間分
-                if (weekdays.includes(candidate.getDay()) && candidate > now) {
-                    // 1年より未来は異常とみなす
-                    if (candidate - now > 365 * 24 * 60 * 60 * 1000) return null;
-                    return candidate;
-                }
-                candidate.setDate(candidate.getDate() + 1);
-            }
-            return null;
-        }
-        case 'monthly': {
-            // 毎月同じ日付
-            next = new Date(base);
-            let maxLoop = 240; // 20年分
-            while (next <= now && maxLoop-- > 0) {
-                next.setMonth(next.getMonth() + 1);
-            }
-            if (maxLoop <= 0) return null;
-            if (next - now > 365 * 24 * 60 * 60 * 1000) return null;
-            return next > now ? next : null;
-        }
-        case 'monthly-dates': {
-            // 毎月指定日
-            const dates = alert.dates || [];
-            if (dates.length === 0) return null;
-            let candidate = new Date(now);
-            candidate.setHours(base.getHours(), base.getMinutes(), 0, 0);
-            // 今月・来月の候補を探す
-            let found = null;
-            for (let m = 0; m < 2; m++) {
-                for (let d of dates) {
-                    let test = new Date(candidate.getFullYear(), candidate.getMonth() + m, d, base.getHours(), base.getMinutes(), 0, 0);
-                    // 日付が不正（例：2月30日→3月2日など）を除外
-                    if (test.getDate() !== d) continue;
-                    if (test > now) {
-                        if (!found || test < found) found = test;
-                    }
-                }
-            }
-            if (found && (found - now > 365 * 24 * 60 * 60 * 1000)) return null;
-            return found;
-        }
-        default:
-            return null;
-    }
-}
+    
+    timeline.innerHTML = timelineHtml;
+    console.log('✅ updateTimeline完了: HTMLを設定しました');
+    console.log('📄 生成されたHTML長:', timelineHtml.length, '文字');
 }
 
 // 日時をフォーマット
@@ -958,7 +924,7 @@ function updateUrlInputStyle() {
 }
 
 // かわいい確認ダイアログを表示
-function showCuteConfirmDialog(title, message) {
+function showCuteConfirmDialog(title, message, confirmText = '削除する') {
     return new Promise((resolve) => {
         const dialog = document.createElement('div');
         dialog.className = 'cute-dialog-overlay';
@@ -977,7 +943,7 @@ function showCuteConfirmDialog(title, message) {
                         <span>キャンセル</span>
                     </button>
                     <button class="cute-btn cute-btn-primary" onclick="handleCuteDialogResponse(true)">
-                        <span>削除する</span>
+                        <span>${confirmText}</span>
                     </button>
                 </div>
             </div>
@@ -1130,25 +1096,55 @@ function getSelectedEditDates() {
 
 // アラートをスキップ
 async function skipAlert(id) {
-    const confirmed = await showCuteConfirmDialog('この通知をスキップしますか？', 'この回の通知をスキップして次回の予定に進みます。');
+    console.log(`「スキップ」ボタンがクリックされました: ID=${id}`);
+    
+    const confirmed = await showCuteConfirmDialog('この通知をスキップしますか？', 'この回の通知をスキップして次回の予定に進みます。', 'スキップ');
     if (!confirmed) {
+        console.log('スキップがキャンセルされました');
         return;
     }
     
+    console.log(`スキップ処理開始: ID=${id}`);
+    console.log('IPC通信でskip-alertを送信中...');
+    
     try {
-        await ipcRenderer.invoke('skip-alert', id);
-        await loadAlerts();
-        updateTimeline();
+        const result = await ipcRenderer.invoke('skip-alert', id);
+        console.log('IPC通信完了、スキップ結果:', result);
         
-        console.log('アラートをスキップしました:', id);
+        if (result.success) {
+            console.log('スキップ成功、UIを更新中...');
+            
+            // アラートデータを再読み込み
+            console.log('Step 1: アラートデータの再読み込み開始');
+            await loadAlerts();
+            console.log('Step 2: アラートデータ再読み込み完了、新しいデータ数:', alerts.length);
+            
+            // タイムラインを更新
+            console.log('Step 3: タイムライン更新開始');
+            updateTimeline();
+            console.log('Step 4: タイムライン更新完了');
+            
+            // 成功メッセージを表示
+            showCuteAlert(result.message || 'アラートをスキップしました。', 'info');
+            console.log('✅ スキップ処理完了:', id);
+        } else {
+            const errorMessage = result.error || 'アラートのスキップに失敗しました。';
+            console.error('❌ アラートスキップ失敗:', errorMessage);
+            showCuteAlert(errorMessage, 'error');
+        }
     } catch (error) {
-        console.error('アラートスキップエラー:', error);
-        showCuteAlert('アラートのスキップに失敗しました。', 'error');
+        console.error('❌ アラートスキップエラー:', error);
+        const errorMessage = error && error.message ? error.message : 
+                            error && typeof error === 'string' ? error : 
+                            'アラートのスキップ処理でエラーが発生しました。';
+        showCuteAlert(errorMessage, 'error');
     }
 }
 
 // DOM読み込み後に曜日・日付ボタンのイベントリスナーを設定
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 DOM読み込み完了、初期化開始...');
+    
     // 曜日ボタンのクリックイベント
     const weekdayBtns = document.querySelectorAll('#weekday-options .weekday-btn');
     weekdayBtns.forEach(btn => {
@@ -1182,15 +1178,27 @@ document.addEventListener('DOMContentLoaded', function() {
     if (urlInput) urlInput.addEventListener('input', validateFormInputs);
     if (repeatSelect) repeatSelect.addEventListener('change', validateFormInputs);
 
+    console.log('📝 イベントリスナー設定完了');
+
     // 設定を読み込み
+    console.log('⚙️ 設定読み込み開始...');
     loadSettingsFromStorage();
 
     // タイムライン初期表示
-    loadAlerts().then(updateTimeline);
+    console.log('📋 タイムライン初期化開始...');
+    loadAlerts().then(() => {
+        console.log('📊 アラート読み込み完了、タイムライン更新開始...');
+        updateTimeline();
+        console.log('✅ 初期化完了！');
+    }).catch(error => {
+        console.error('❌ 初期化エラー:', error);
+    });
 
     // ホットキー入力のクリックイベントを設定
     const hotkeyInput = document.getElementById('timeline-hotkey');
     hotkeyInput.addEventListener('click', captureHotkey);
+    
+    console.log('🎯 初期化処理全体完了');
 });
 
 // 設定ウィンドウ関連の変数
